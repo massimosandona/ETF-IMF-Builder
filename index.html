@@ -1,2089 +1,1490 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import Papa from 'papaparse';
+import { Upload, Star, Filter, TrendingUp, DollarSign, Package, Building, BarChart3, Plus, Minus, Check, X, AlertCircle, Database, RefreshCw, Download, FileText, Share2 } from 'lucide-react';
 
 const ETFPortfolioCreator = () => {
-  const [etfData, setEtfData] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [currentView, setCurrentView] = useState('upload');
-  const [uploadError, setUploadError] = useState('');
+  const [uploadedData, setUploadedData] = useState([]);
+  const [fileName, setFileName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [selectedMode, setSelectedMode] = useState('custom');
   const [allocations, setAllocations] = useState({
-    obbligazionari: 0,
-    azionari: 0,
-    materie: 0,
-    immobiliare: 0
+    bonds: 0,
+    equity: 0,
+    commodities: 0,
+    real_estate: 0
   });
-  
-  const [predefinedPortfolios] = useState({
-    conservativo: {
-      name: '🛡️ Conservativo "Safe Harbor"',
-      description: 'Preservazione capitale con crescita moderata',
-      allocation: { obbligazionari: 70, azionari: 20, materie: 5, immobiliare: 5 },
-      targetReturn: '2-4% annuo',
-      riskLevel: 'Basso',
-      timeHorizon: '3-5 anni'
+  const [filters, setFilters] = useState({
+    bonds: {
+      distribution: 'all',
+      replication: 'all',
+      currency: 'all',
+      sortBy: 'aum'
     },
-    bilanciato: {
-      name: '⚖️ Bilanciato 60/40',
-      description: 'Il classico portafoglio equilibrato',
-      allocation: { obbligazionari: 40, azionari: 60, materie: 0, immobiliare: 0 },
-      targetReturn: '5-7% annuo',
-      riskLevel: 'Medio',
-      timeHorizon: '5-10 anni'
+    equity: {
+      distribution: 'all',
+      replication: 'all',
+      currency: 'all',
+      sortBy: 'aum'
     },
-    allWeather: {
-      name: '🌦️ All Weather',
-      description: 'Strategia di Ray Dalio per ogni scenario economico',
-      allocation: { obbligazionari: 55, azionari: 30, materie: 7.5, immobiliare: 7.5 },
-      targetReturn: '5-6% annuo',
-      riskLevel: 'Medio-Basso',
-      timeHorizon: '10+ anni'
+    commodities: {
+      distribution: 'all',
+      replication: 'all',
+      currency: 'all',
+      sortBy: 'aum'
     },
-    growth: {
-      name: '🚀 Growth Dinamico',
-      description: 'Massima crescita per investitori giovani',
-      allocation: { obbligazionari: 15, azionari: 75, materie: 5, immobiliare: 5 },
-      targetReturn: '8-12% annuo',
-      riskLevel: 'Alto',
-      timeHorizon: '15+ anni'
+    real_estate: {
+      distribution: 'all',
+      replication: 'all',
+      currency: 'all',
+      sortBy: 'aum'
     }
   });
-  
-  const [categoryPreferences, setCategoryPreferences] = useState({
-    obbligazionari: {
-      distribuzione: 'Tutti',
-      replica: 'Tutti',
-      valuta: 'Tutti',
-      sortOrder: 'aum_desc',
-      selectedCategories: new Set()
-    },
-    azionari: {
-      distribuzione: 'Tutti',
-      replica: 'Tutti',
-      valuta: 'Tutti',
-      sortOrder: 'aum_desc',
-      selectedCategories: new Set()
-    },
-    materie: {
-      distribuzione: 'Tutti',
-      replica: 'Tutti',
-      valuta: 'Tutti',
-      sortOrder: 'aum_desc',
-      selectedCategories: new Set()
-    },
-    immobiliare: {
-      distribuzione: 'Tutti',
-      replica: 'Tutti',
-      valuta: 'Tutti',
-      sortOrder: 'aum_desc',
-      selectedCategories: new Set()
-    }
-  });
-
-  const [categoriesByMacro, setCategoriesByMacro] = useState({
-    obbligazionari: [],
-    azionari: [],
-    materie: [],
-    immobiliare: []
-  });
-
-  const [filteredETFs, setFilteredETFs] = useState({
-    obbligazionari: [],
-    azionari: [],
-    materie: [],
-    immobiliare: []
-  });
-
-  const [favoriteETFs, setFavoriteETFs] = useState(new Set());
   const [selectedETFs, setSelectedETFs] = useState({
-    obbligazionari: {},
-    azionari: {},
-    materie: {},
-    immobiliare: {}
+    bonds: {},
+    equity: {},
+    commodities: {},
+    real_estate: {}
   });
+  const [starredETFs, setStarredETFs] = useState(new Set());
 
-  const COLORS = {
-    obbligazionari: '#3B82F6',
-    azionari: '#EF4444',
-    materie: '#FCD34D',
-    immobiliare: '#10B981'
-  };
+  const [showExportView, setShowExportView] = useState(false);
 
   const macroCategories = {
-    obbligazionari: { name: 'Obbligazionari', icon: '🏦' },
-    azionari: { name: 'Azionari', icon: '📈' },
-    materie: { name: 'Materie Prime', icon: '🥇' },
-    immobiliare: { name: 'Immobiliare', icon: '🏢' }
-  };
-
-  const categorizeMacro = (categoria, categoriaMorningstar) => {
-    const cat = categoria.toLowerCase();
-    const morningstar = categoriaMorningstar.toLowerCase();
-    
-    if (cat.includes('obbligazionar')) return 'obbligazionari';
-    if (cat.includes('azionar')) return 'azionari';
-    if (morningstar.includes('materie') || morningstar.includes('commodit') || morningstar.includes('oro') || morningstar.includes('metall')) return 'materie';
-    if (morningstar.includes('immobiliare') || morningstar.includes('reit')) return 'immobiliare';
-    
-    if (cat.includes('obbligazionar')) return 'obbligazionari';
-    return 'azionari';
-  };
-
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    if (!file.name.toLowerCase().endsWith('.csv')) {
-      setUploadError('Per favore seleziona un file CSV valido');
-      return;
-    }
-
-    setLoading(true);
-    setUploadError('');
-
-    try {
-      const fileContent = await file.text();
-      
-      const parsedData = Papa.parse(fileContent, {
-        header: true,
-        dynamicTyping: true,
-        skipEmptyLines: true,
-        delimitersToGuess: [',', '\t', '|', ';']
-      });
-
-      if (parsedData.errors.length > 0) {
-        throw new Error('Errore nel parsing del file CSV');
-      }
-
-      const requiredColumns = ['Nome', 'ISIN', 'Categoria', 'Categoria Morningstar', 'TER', 'Valuta'];
-      const csvColumns = parsedData.meta.fields || [];
-      const missingColumns = requiredColumns.filter(col => !csvColumns.includes(col));
-      
-      if (missingColumns.length > 0) {
-        throw new Error(`Colonne mancanti nel CSV: ${missingColumns.join(', ')}`);
-      }
-      
-      const cleanedData = parsedData.data.map(etf => {
-        const aumValue = etf[' AuM (Mln EUR) '] || etf['AuM (Mln EUR)'] || etf.AuM || 0;
-        const terValue = typeof etf.TER === 'string' ? 
-          parseFloat(etf.TER.replace(',', '.')) : 
-          etf.TER || 0;
-        
-        const macroCategory = categorizeMacro(etf.Categoria || '', etf['Categoria Morningstar'] || '');
-        
-        return {
-          ...etf,
-          AuM: aumValue,
-          TER: terValue,
-          categoria_normalized: macroCategory
-        };
-      });
-      
-      setEtfData(cleanedData);
-      
-      const categorizedMorningstar = {
-        obbligazionari: [],
-        azionari: [],
-        materie: [],
-        immobiliare: []
-      };
-
-      cleanedData.forEach(etf => {
-        const morningstarCat = etf['Categoria Morningstar'];
-        const macroCat = etf.categoria_normalized;
-        
-        if (morningstarCat && !categorizedMorningstar[macroCat].includes(morningstarCat)) {
-          categorizedMorningstar[macroCat].push(morningstarCat);
-        }
-      });
-
-      Object.keys(categorizedMorningstar).forEach(key => {
-        categorizedMorningstar[key].sort();
-      });
-
-      setCategoriesByMacro(categorizedMorningstar);
-      
-      const initialPreferences = { ...categoryPreferences };
-      Object.keys(categorizedMorningstar).forEach(macroKey => {
-        initialPreferences[macroKey].selectedCategories = new Set(categorizedMorningstar[macroKey]);
-        initialPreferences[macroKey].valuta = 'Tutti';
-      });
-      setCategoryPreferences(initialPreferences);
-      
-      setCurrentView('selection');
-      setLoading(false);
-    } catch (error) {
-      console.error('Errore nel caricamento del file:', error);
-      setUploadError(error.message || 'Errore nel caricamento del file CSV');
-      setLoading(false);
+    bonds: { 
+      name: 'Obbligazionari', 
+      color: '#2563EB',
+      colorLight: '#3B82F6',
+      colorDark: '#1E40AF',
+      bgGradient: 'from-blue-900/20 to-blue-800/20',
+      borderColor: 'border-blue-600',
+      icon: '📈' 
+    },
+    equity: { 
+      name: 'Azionari', 
+      color: '#DC2626',
+      colorLight: '#EF4444',
+      colorDark: '#B91C1C',
+      bgGradient: 'from-red-900/20 to-red-800/20',
+      borderColor: 'border-red-600',
+      icon: '📊' 
+    },
+    commodities: { 
+      name: 'Materie Prime', 
+      color: '#D97706',
+      colorLight: '#F59E0B',
+      colorDark: '#B45309',
+      bgGradient: 'from-amber-900/20 to-amber-800/20',
+      borderColor: 'border-amber-600',
+      icon: '🏭' 
+    },
+    real_estate: { 
+      name: 'Immobiliare', 
+      color: '#059669',
+      colorLight: '#10B981',
+      colorDark: '#047857',
+      bgGradient: 'from-emerald-900/20 to-emerald-800/20',
+      borderColor: 'border-emerald-600',
+      icon: '🏢' 
     }
   };
 
-  const totalAllocation = Object.values(allocations).reduce((sum, val) => sum + val, 0);
-
-  const handleAllocationChange = (category, value) => {
-    const numValue = Math.max(0, Math.min(100, parseInt(value) || 0));
-    setAllocations(prev => ({
-      ...prev,
-      [category]: numValue
-    }));
-  };
-
-  const pieData = [
-    { name: 'Obbligazionari', value: allocations.obbligazionari, color: COLORS.obbligazionari },
-    { name: 'Azionari', value: allocations.azionari, color: COLORS.azionari },
-    { name: 'Materie Prime', value: allocations.materie, color: COLORS.materie },
-    { name: 'Immobiliare', value: allocations.immobiliare, color: COLORS.immobiliare }
-  ].filter(item => item.value > 0);
-  
-  // Aggiungi la parte mancante se il totale è inferiore a 100
-  if (totalAllocation < 100) {
-    pieData.push({
-      name: 'Da allocare',
-      value: 100 - totalAllocation,
-      color: '#374151' // Grigio scuro trasparente
-    });
-  }
-
-  const updateCategoryPreference = (macroCategory, field, value) => {
-    setCategoryPreferences(prev => ({
-      ...prev,
-      [macroCategory]: {
-        ...prev[macroCategory],
-        [field]: value
-      }
-    }));
-  };
-
-  const toggleMorningstarCategory = (macroCategory, category) => {
-    setCategoryPreferences(prev => {
-      const newSelectedCategories = new Set(prev[macroCategory].selectedCategories);
-      if (newSelectedCategories.has(category)) {
-        newSelectedCategories.delete(category);
-      } else {
-        newSelectedCategories.add(category);
-      }
-      
-      return {
-        ...prev,
-        [macroCategory]: {
-          ...prev[macroCategory],
-          selectedCategories: newSelectedCategories
-        }
-      };
-    });
-  };
-
-  const toggleAllCategoriesForMacro = (macroCategory) => {
-    const allCategoriesForMacro = categoriesByMacro[macroCategory];
-    const currentSelected = categoryPreferences[macroCategory].selectedCategories;
+  // Helper function per ottenere il valore AuM con diversi possibili nomi di campo
+  const getAuMValue = (etf) => {
+    if (!etf) return null;
     
-    setCategoryPreferences(prev => ({
-      ...prev,
-      [macroCategory]: {
-        ...prev[macroCategory],
-        selectedCategories: currentSelected.size === allCategoriesForMacro.length 
-          ? new Set() 
-          : new Set(allCategoriesForMacro)
-      }
-    }));
-  };
-
-  const toggleFavoriteETF = (etfISIN) => {
-    setFavoriteETFs(prev => {
-      const newFavorites = new Set(prev);
-      if (newFavorites.has(etfISIN)) {
-        newFavorites.delete(etfISIN);
-      } else {
-        newFavorites.add(etfISIN);
-      }
-      return newFavorites;
-    });
-  };
-
-  const toggleETFInPortfolio = (macroCategory, etf) => {
-    setSelectedETFs(prev => {
-      const newSelected = { ...prev };
-      if (newSelected[macroCategory][etf.ISIN]) {
-        delete newSelected[macroCategory][etf.ISIN];
-      } else {
-        newSelected[macroCategory][etf.ISIN] = {
-          ...etf,
-          weight: 25
-        };
-      }
-      return newSelected;
-    });
-  };
-
-  const updateETFWeight = (macroCategory, etfISIN, newWeight) => {
-    const weight = Math.max(1, Math.min(100, parseInt(newWeight) || 1));
-    setSelectedETFs(prev => ({
-      ...prev,
-      [macroCategory]: {
-        ...prev[macroCategory],
-        [etfISIN]: {
-          ...prev[macroCategory][etfISIN],
-          weight: weight
-        }
-      }
-    }));
-  };
-
-  const getTotalWeightForCategory = (macroCategory) => {
-    return Object.values(selectedETFs[macroCategory]).reduce((sum, etf) => sum + etf.weight, 0);
-  };
-
-  const getEffectiveWeight = (macroCategory, etfWeight) => {
-    const totalCategoryWeight = getTotalWeightForCategory(macroCategory);
-    if (totalCategoryWeight === 0) return 0;
-    return (etfWeight / totalCategoryWeight) * allocations[macroCategory];
-  };
-
-  const activeMacroCategories = Object.keys(macroCategories).filter(key => allocations[key] > 0);
-
-  const isPortfolioComplete = () => {
-    return activeMacroCategories.every(macroKey => {
-      const categoryETFs = Object.values(selectedETFs[macroKey]);
-      if (categoryETFs.length === 0) return false;
-      const totalWeight = getTotalWeightForCategory(macroKey);
-      return totalWeight === 100;
-    });
-  };
-
-  const calculateETFScore = (etf, portfolioType, macroCategory, distribuzionePreference) => {
-    let score = 0;
+    // Lista di tutti i possibili nomi del campo AuM
+    const possibleFields = [
+      'AuM (Mln EUR)',
+      'AuM (Mln EUR)', // Con spazi diversi
+      'AuM(Mln EUR)',  // Senza spazio
+      'AUM (MLN EUR)',
+      'AuM',
+      'AUM',
+      'Assets under Management',
+      'AuM (Mln €)',
+      'AuM Mln EUR',
+      'AuM Mln €',
+      'aum',
+      'Aum'
+    ];
     
-    // Base score from AuM and TER
-    const aumScore = Math.min((etf.AuM || 0) * 0.4, 2000);
-    const terScore = Math.max(0, 100 - (etf.TER * 100));
-    score = aumScore + terScore;
-    
-    // Bonus per tipo di distribuzione preferito
-    if (etf.Distribuzione === distribuzionePreference) {
-      score += 150; // Bonus significativo per ETF del tipo preferito
-    }
-    
-    // Portfolio-specific bonuses
-    const morningstarCat = (etf['Categoria Morningstar'] || '').toLowerCase();
-    
-    if (portfolioType === 'conservativo') {
-      if (macroCategory === 'obbligazionari') {
-        if (morningstarCat.includes('governativ') && morningstarCat.includes('eur')) score += 100;
-        if (morningstarCat.includes('breve termine')) score += 50;
-        if (morningstarCat.includes('corporate') && morningstarCat.includes('investment')) score += 30;
-        if (morningstarCat.includes('high yield') || morningstarCat.includes('emergent')) score -= 200;
-      }
-      if (macroCategory === 'azionari') {
-        if (morningstarCat.includes('large cap')) score += 50;
-        if (morningstarCat.includes('europa') || morningstarCat.includes('global')) score += 40;
-        if (morningstarCat.includes('small cap') || morningstarCat.includes('emergent')) score -= 100;
+    // Prima prova match esatto
+    for (const field of possibleFields) {
+      if (etf.hasOwnProperty(field) && etf[field] !== undefined && etf[field] !== null && etf[field] !== '') {
+        return etf[field];
       }
     }
     
-    if (portfolioType === 'growth') {
-      if (macroCategory === 'azionari') {
-        if (morningstarCat.includes('tecnolog') || morningstarCat.includes('tech')) score += 60;
-        if (morningstarCat.includes('small cap')) score += 40;
-        if (morningstarCat.includes('emergent')) score += 50;
+    // Se non trova, cerca nei campi con partial match
+    const etfKeys = Object.keys(etf);
+    for (const key of etfKeys) {
+      if (key.toLowerCase().includes('aum') && etf[key] !== undefined && etf[key] !== null && etf[key] !== '') {
+        return etf[key];
       }
     }
     
-    if (portfolioType === 'allWeather') {
-      if (macroCategory === 'obbligazionari') {
-        if (morningstarCat.includes('lungo termine') || morningstarCat.includes('10')) score += 40;
-        if (morningstarCat.includes('breve') || morningstarCat.includes('1-3')) score += 30;
-      }
-      if (macroCategory === 'materie' && morningstarCat.includes('oro')) score += 100;
-    }
-    
-    // Diversification bonus for different providers
-    const provider = (etf.Nome || '').toLowerCase();
-    const providers = ['vanguard', 'amundi', 'xtrackers', 'spdr', 'lyxor', 'invesco', 'wisdomtree'];
-    providers.forEach(p => {
-      if (provider.includes(p)) score += 20;
-    });
-    
-    return score;
-  };
-
-  const selectETFsForPredefinedPortfolio = (portfolioType, distribuzionePreference = 'Accumulazione') => {
-    const portfolio = predefinedPortfolios[portfolioType];
-    const selection = {
-      obbligazionari: {},
-      azionari: {},
-      materie: {},
-      immobiliare: {}
-    };
-    
-    Object.entries(portfolio.allocation).forEach(([macroCategory, targetPercentage]) => {
-      if (targetPercentage === 0) return;
-      
-      // Filter and score ETFs for this category
-      const categoryETFs = etfData
-        .filter(etf => etf.categoria_normalized === macroCategory)
-        .map(etf => ({
-          ...etf,
-          score: calculateETFScore(etf, portfolioType, macroCategory, distribuzionePreference)
-        }))
-        .sort((a, b) => b.score - a.score);
-      
-      // Select top ETFs with provider diversification
-      const selectedProviders = new Set();
-      const maxETFsPerCategory = Math.min(4, Math.ceil(targetPercentage / 20));
-      let selectedCount = 0;
-      
-      for (const etf of categoryETFs) {
-        if (selectedCount >= maxETFsPerCategory) break;
-        
-        const provider = (etf.Nome || '').toLowerCase().split(' ')[0];
-        if (!selectedProviders.has(provider) || selectedCount < 2) {
-          selectedProviders.add(provider);
-          
-          // Calculate weight distribution
-          let weight;
-          if (selectedCount === 0) weight = 50;
-          else if (selectedCount === 1) weight = 30;
-          else if (selectedCount === 2) weight = 20;
-          else weight = Math.floor(100 / (selectedCount + 1));
-          
-          selection[macroCategory][etf.ISIN] = {
-            ...etf,
-            weight: weight
-          };
-          
-          selectedCount++;
-        }
-      }
-      
-      // Normalize weights to 100%
-      const totalWeight = Object.values(selection[macroCategory])
-        .reduce((sum, etf) => sum + etf.weight, 0);
-      
-      if (totalWeight > 0 && totalWeight !== 100) {
-        Object.keys(selection[macroCategory]).forEach(isin => {
-          selection[macroCategory][isin].weight = 
-            Math.round((selection[macroCategory][isin].weight / totalWeight) * 100);
-        });
-      }
-    });
-    
-    return selection;
-  };
-
-  const CustomTooltip = ({ active, payload }) => {
-    if (active && payload && payload.length) {
-      const data = payload[0];
-      const isDaAllocare = data.name === 'Da allocare';
-      return (
-        <div className={`${isDaAllocare ? 'bg-gray-800/95' : 'bg-white/95'} backdrop-blur-sm p-4 rounded-xl shadow-2xl border ${isDaAllocare ? 'border-gray-600' : 'border-gray-200'} transform transition-all duration-200 scale-105`}>
-          <p className={`font-bold ${isDaAllocare ? 'text-gray-300' : 'text-gray-800'} text-lg`}>{data.name}</p>
-          <p className={`${isDaAllocare ? 'text-gray-400' : 'text-blue-600'} font-semibold text-xl`}>{data.value}%</p>
-        </div>
-      );
-    }
     return null;
   };
 
-  useEffect(() => {
-    if (etfData.length === 0) return;
-
-    const newFilteredETFs = {
-      obbligazionari: [],
-      azionari: [],
-      materie: [],
-      immobiliare: []
-    };
-
-    Object.keys(macroCategories).forEach(macroKey => {
-      if (allocations[macroKey] > 0) {
-        let filtered = etfData.filter(etf => {
-          if (etf.categoria_normalized !== macroKey) return false;
-
-          if (!categoryPreferences[macroKey].selectedCategories.has(etf['Categoria Morningstar'])) {
-            return false;
-          }
-
-          if (categoryPreferences[macroKey].distribuzione !== 'Tutti' && 
-              etf.Distribuzione !== categoryPreferences[macroKey].distribuzione) {
-            return false;
-          }
-
-          if (categoryPreferences[macroKey].replica !== 'Tutti' && 
-              etf.Replica !== categoryPreferences[macroKey].replica) {
-            return false;
-          }
-
-          if (categoryPreferences[macroKey].valuta !== 'Tutti' && 
-              etf.Valuta !== categoryPreferences[macroKey].valuta) {
-            return false;
-          }
-
-          return true;
-        });
-
-        switch (categoryPreferences[macroKey].sortOrder) {
-          case 'alfabetico':
-            filtered.sort((a, b) => a.Nome.localeCompare(b.Nome));
-            break;
-          case 'aum_desc':
-            filtered.sort((a, b) => (b.AuM || 0) - (a.AuM || 0));
-            break;
-          case 'ter_desc':
-            filtered.sort((a, b) => (b.TER || 0) - (a.TER || 0));
-            break;
-          default:
-            filtered.sort((a, b) => (b.AuM || 0) - (a.AuM || 0));
-        }
-
-        newFilteredETFs[macroKey] = filtered;
-      }
-    });
-
-    setFilteredETFs(newFilteredETFs);
-  }, [etfData, allocations, categoryPreferences]);
-
-  const StarIcon = ({ isFavorite, onClick }) => (
-    <button
-      onClick={onClick}
-      className="p-1 rounded-full transition-all duration-300 transform hover:scale-110"
-      title={isFavorite ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}
-    >
-      {isFavorite ? (
-        <svg className="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-        </svg>
-      ) : (
-        <svg className="w-5 h-5 text-gray-400 hover:text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-        </svg>
-      )}
-    </button>
-  );
-
-  const PredefinedPortfoliosScreen = () => {
-    const [selectedPortfolio, setSelectedPortfolio] = useState(null);
-    const [previewETFs, setPreviewETFs] = useState(null);
-    const [distribuzionePreference, setDistribuzionePreference] = useState('Accumulazione');
-
-    const handleSelectPortfolio = (portfolioKey) => {
-      setSelectedPortfolio(portfolioKey);
-      const autoSelected = selectETFsForPredefinedPortfolio(portfolioKey, distribuzionePreference);
-      setPreviewETFs(autoSelected);
-    };
-
-    const handleDistribuzioneChange = (newValue) => {
-      setDistribuzionePreference(newValue);
-      // Se c'è già un portafoglio selezionato, ricalcola la selezione
-      if (selectedPortfolio) {
-        const autoSelected = selectETFsForPredefinedPortfolio(selectedPortfolio, newValue);
-        setPreviewETFs(autoSelected);
-      }
-    };
-
-    const applyPortfolio = () => {
-      if (selectedPortfolio && previewETFs) {
-        setAllocations(predefinedPortfolios[selectedPortfolio].allocation);
-        setSelectedETFs(previewETFs);
-        setCurrentView('builder');
-      }
-    };
-
-    const portfolioColors = {
-      conservativo: { primary: '#3B82F6', secondary: '#60A5FA' },
-      bilanciato: { primary: '#8B5CF6', secondary: '#A78BFA' },
-      allWeather: { primary: '#F59E0B', secondary: '#FCD34D' },
-      growth: { primary: '#10B981', secondary: '#34D399' }
-    };
-
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-8">
-            <h1 className="text-5xl font-bold bg-gradient-to-r from-green-400 via-emerald-500 to-teal-400 bg-clip-text text-transparent mb-3">
-              ETF MODEL Portfolio
-            </h1>
-            <p className="text-lg text-gray-300">Scegli una strategia di investimento ottimizzata</p>
-            <button
-              onClick={() => setCurrentView('selection')}
-              className="mt-3 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-all duration-300"
-            >
-              ← Torna alla selezione
-            </button>
-          </div>
-
-          {/* Selettore Accumulazione/Distribuzione */}
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700 mb-8">
-            <h2 className="text-xl font-bold mb-4 text-center">Preferenza ETF</h2>
-            <div className="flex justify-center gap-4">
-              <button
-                onClick={() => handleDistribuzioneChange('Accumulazione')}
-                className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${
-                  distribuzionePreference === 'Accumulazione'
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg scale-105'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                <div className="flex items-center space-x-2">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <span>ETF ad Accumulazione</span>
-                </div>
-                <div className="text-xs mt-1 opacity-80">Reinvestono automaticamente i dividendi</div>
-              </button>
-              
-              <button
-                onClick={() => handleDistribuzioneChange('Distribuzione')}
-                className={`px-6 py-3 rounded-lg font-semibold transition-all duration-300 ${
-                  distribuzionePreference === 'Distribuzione'
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg scale-105'
-                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                }`}
-              >
-                <div className="flex items-center space-x-2">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                  </svg>
-                  <span>ETF a Distribuzione</span>
-                </div>
-                <div className="text-xs mt-1 opacity-80">Distribuiscono periodicamente i dividendi</div>
-              </button>
-            </div>
-            <div className="text-center mt-4 text-sm text-gray-400">
-              {distribuzionePreference === 'Accumulazione' 
-                ? "Ideale per la crescita a lungo termine senza tassazione sui dividendi"
-                : "Ideale per chi desidera un flusso di reddito periodico"}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-6 mb-8">
-            {Object.entries(predefinedPortfolios).map(([key, portfolio]) => {
-              const colors = portfolioColors[key];
-              const isSelected = selectedPortfolio === key;
-              
-              return (
-                <div
-                  key={key}
-                  onClick={() => handleSelectPortfolio(key)}
-                  className={`bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border-2 transition-all duration-300 cursor-pointer transform hover:scale-105 ${
-                    isSelected 
-                      ? 'shadow-2xl scale-105' 
-                      : 'border-gray-700 hover:border-gray-600'
-                  }`}
-                  style={{
-                    borderColor: isSelected ? colors.primary : undefined,
-                    boxShadow: isSelected ? `0 0 30px ${colors.primary}40` : undefined
-                  }}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <h3 className="text-2xl font-bold">{portfolio.name}</h3>
-                    <div className={`px-3 py-1 rounded-full text-xs font-bold ${
-                      portfolio.riskLevel === 'Basso' ? 'bg-green-600/20 text-green-400' :
-                      portfolio.riskLevel === 'Medio' ? 'bg-yellow-600/20 text-yellow-400' :
-                      portfolio.riskLevel === 'Medio-Basso' ? 'bg-blue-600/20 text-blue-400' :
-                      'bg-red-600/20 text-red-400'
-                    }`}>
-                      Rischio {portfolio.riskLevel}
-                    </div>
-                  </div>
-                  
-                  <p className="text-gray-300 text-sm mb-4">{portfolio.description}</p>
-                  
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div className="bg-gray-700/30 rounded-lg p-3">
-                      <div className="text-xs text-gray-400">Rendimento Atteso</div>
-                      <div className="text-lg font-bold" style={{color: colors.secondary}}>
-                        {portfolio.targetReturn}
-                      </div>
-                    </div>
-                    <div className="bg-gray-700/30 rounded-lg p-3">
-                      <div className="text-xs text-gray-400">Orizzonte Temporale</div>
-                      <div className="text-lg font-bold text-gray-200">
-                        {portfolio.timeHorizon}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    {Object.entries(portfolio.allocation).map(([category, percentage]) => {
-                      if (percentage === 0) return null;
-                      return (
-                        <div key={category} className="flex items-center justify-between">
-                          <div className="flex items-center">
-                            <div 
-                              className="w-3 h-3 rounded-full mr-2" 
-                              style={{backgroundColor: COLORS[category]}}
-                            />
-                            <span className="text-sm">{macroCategories[category].name}</span>
-                          </div>
-                          <span className="font-bold">{percentage}%</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-4 h-32">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={Object.entries(portfolio.allocation)
-                            .filter(([_, value]) => value > 0)
-                            .map(([category, value]) => ({
-                              name: macroCategories[category].name,
-                              value: value,
-                              color: COLORS[category]
-                            }))}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={25}
-                          outerRadius={50}
-                          paddingAngle={3}
-                          dataKey="value"
-                        >
-                          {Object.entries(portfolio.allocation)
-                            .filter(([_, value]) => value > 0)
-                            .map(([category], index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[category]} />
-                            ))}
-                        </Pie>
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-
-                  {isSelected && (
-                    <div className="mt-4 text-center">
-                      <div className="text-sm font-bold" style={{color: colors.primary}}>
-                        ✓ Selezionato
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {selectedPortfolio && previewETFs && (
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700 mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-2xl font-bold">
-                  Anteprima ETF Selezionati Automaticamente
-                </h3>
-                <div className="px-4 py-2 bg-blue-600/20 text-blue-400 rounded-lg text-sm font-semibold">
-                  Preferenza: {distribuzionePreference}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 max-h-96 overflow-y-auto">
-                {Object.entries(previewETFs).map(([category, etfs]) => {
-                  const etfList = Object.values(etfs);
-                  if (etfList.length === 0) return null;
-                  
-                  return (
-                    <div key={category} className="bg-gray-700/30 rounded-lg p-4">
-                      <h4 className="font-bold mb-2 flex items-center">
-                        <div 
-                          className="w-4 h-4 rounded-full mr-2" 
-                          style={{backgroundColor: COLORS[category]}}
-                        />
-                        {macroCategories[category].name}
-                      </h4>
-                      <div className="space-y-2">
-                        {etfList.map((etf, idx) => (
-                          <div key={idx} className="text-sm">
-                            <div className="font-medium text-blue-300">
-                              {etf.Nome} ({etf.weight}%)
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              TER: {etf.TER}% | AuM: {etf.AuM?.toLocaleString()}M€ | {etf.Distribuzione || 'N/D'}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="text-center mt-6">
-                <button
-                  disabled
-                  className="px-8 py-3 bg-gray-600 text-gray-400 font-bold rounded-xl cursor-not-allowed opacity-50"
-                >
-                  Applica Portafoglio e Personalizza →
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
+  // Helper function per ottenere il valore TER
+  const getTERValue = (etf) => {
+    if (!etf || !etf.TER) return null;
+    
+    // Il TER nel CSV è già in formato decimale (es. 0,07 = 0,07%)
+    // Dobbiamo solo convertire la virgola in punto per il parsing
+    const terStr = String(etf.TER).replace(',', '.');
+    const terValue = parseFloat(terStr);
+    
+    return isNaN(terValue) ? null : terValue;
   };
 
-  const StarredPortfolioScreen = () => {
-    // Controlla quali categorie hanno almeno un ETF preferito
-    const checkFavoritesByCategory = () => {
-      const categories = {
-        obbligazionari: false,
-        azionari: false,
-        materie: false,
-        immobiliare: false
-      };
+  const categorizeETF = (etf) => {
+    const category = etf['Categoria']?.toLowerCase() || '';
+    const morningstar = etf['Categoria Morningstar']?.toLowerCase() || '';
+    
+    if (category.includes('obbl') || category.includes('bond') || morningstar.includes('bond')) {
+      return 'bonds';
+    } else if (category.includes('azion') || category.includes('equity') || morningstar.includes('equity')) {
+      return 'equity';
+    } else if (category.includes('mater') || category.includes('commod') || morningstar.includes('commodity')) {
+      return 'commodities';
+    } else if (category.includes('immobil') || category.includes('real estate') || morningstar.includes('property')) {
+      return 'real_estate';
+    }
+    return 'equity';
+  };
+
+  const handleFileUpload = (event) => {
+    const file = event.target.files[0];
+    if (file && file.type === 'text/csv') {
+      // Inizia il caricamento
+      setIsLoading(true);
       
-      etfData.forEach(etf => {
-        if (favoriteETFs.has(etf.ISIN)) {
-          categories[etf.categoria_normalized] = true;
+      // Salva il nome del file
+      setFileName(file.name);
+      
+      // Reset tutti i dati quando si carica un nuovo file
+      setSelectedETFs({
+        bonds: {},
+        equity: {},
+        commodities: {},
+        real_estate: {}
+      });
+      setAllocations({
+        bonds: 0,
+        equity: 0,
+        commodities: 0,
+        real_estate: 0
+      });
+      setStarredETFs(new Set());
+      setFilters({
+        bonds: {
+          distribution: 'all',
+          replication: 'all',
+          currency: 'all',
+          sortBy: 'aum'
+        },
+        equity: {
+          distribution: 'all',
+          replication: 'all',
+          currency: 'all',
+          sortBy: 'aum'
+        },
+        commodities: {
+          distribution: 'all',
+          replication: 'all',
+          currency: 'all',
+          sortBy: 'aum'
+        },
+        real_estate: {
+          distribution: 'all',
+          replication: 'all',
+          currency: 'all',
+          sortBy: 'aum'
         }
       });
       
-      return categories;
+      Papa.parse(file, {
+        complete: (results) => {
+          const data = results.data.filter(row => row.Nome && row.ISIN);
+          
+          // Debug: log delle colonne disponibili
+          if (data.length > 0) {
+            console.log('Colonne disponibili nel CSV:', Object.keys(data[0]));
+            console.log('Esempio primo ETF:', data[0]);
+            
+            // Debug specifico per AuM
+            const firstETF = data[0];
+            console.log('--- DEBUG AuM ---');
+            console.log('IMPORTANTE: Se AuM non appare, verifica il nome esatto della colonna nel CSV');
+            console.log('');
+            console.log('Tutti i campi del primo ETF:');
+            Object.keys(firstETF).forEach(key => {
+              console.log(`  "${key}": "${firstETF[key]}" (tipo: ${typeof firstETF[key]})`);
+            });
+            
+            // Cerca specificamente campi AuM
+            console.log('\nCampi che potrebbero contenere AuM:');
+            Object.keys(firstETF).forEach(key => {
+              if (key.toLowerCase().includes('aum') || 
+                  key.toLowerCase().includes('mln') || 
+                  key.toLowerCase().includes('assets')) {
+                console.log(`  ✓ Trovato: "${key}" = "${firstETF[key]}"`);
+              }
+            });
+          }
+          
+          const categorizedData = data.map(etf => {
+            // Pulisci tutti i valori rimuovendo spazi extra
+            const cleanedETF = {};
+            Object.keys(etf).forEach(key => {
+              cleanedETF[key] = typeof etf[key] === 'string' ? etf[key].trim() : etf[key];
+            });
+            
+            return {
+              ...cleanedETF,
+              macroCategory: categorizeETF(cleanedETF),
+              id: cleanedETF.ISIN || Math.random().toString(36).substr(2, 9) // Fallback ID se ISIN manca
+            };
+          });
+          setUploadedData(categorizedData);
+          setIsLoading(false);
+        },
+        header: true,
+        dynamicTyping: false, // Disabilitiamo per controllare meglio i tipi
+        skipEmptyLines: true,
+        delimitersToGuess: [',', ';', '\t', '|'],
+        transformHeader: (header) => {
+          // Rimuovi spazi, caratteri invisibili e normalizza
+          return header.trim().replace(/\s+/g, ' ').replace(/[\u200B-\u200D\uFEFF]/g, '');
+        }
+      });
+    }
+    // Reset l'input per permettere di ricaricare lo stesso file
+    event.target.value = '';
+  };
+
+  const getFilteredDataByCategory = (data, category) => {
+    const categoryFilters = filters[category];
+    return data.filter(etf => {
+      if (categoryFilters.distribution !== 'all') {
+        if (!etf.Distribuzione) return false;
+        const dist = etf.Distribuzione;
+        if (categoryFilters.distribution === 'Acc' && dist !== 'Acc' && dist !== 'Accumulazione') return false;
+        if (categoryFilters.distribution === 'Dist' && dist !== 'Dist' && dist !== 'Distribuzione') return false;
+      }
+      if (categoryFilters.replication !== 'all') {
+        if (!etf.Replica || etf.Replica !== categoryFilters.replication) return false;
+      }
+      if (categoryFilters.currency !== 'all') {
+        if (!etf.Valuta || etf.Valuta !== categoryFilters.currency) return false;
+      }
+      return true;
+    });
+  };
+
+  const getSortedDataByCategory = (data, category) => {
+    const sorted = [...data];
+    const sortBy = filters[category].sortBy;
+    sorted.sort((a, b) => {
+      switch (sortBy) {
+        case 'aum':
+          // Cerca il valore AuM in entrambi gli ETF
+          let aumA = null, aumB = null;
+          
+          // Cerca in tutti i campi
+          for (const [key, value] of Object.entries(a)) {
+            if (key.includes('AuM') || key.includes('AUM') || key.includes('aum')) {
+              aumA = parseFloat(String(value).replace(',', '.')) || 0;
+              break;
+            }
+          }
+          
+          for (const [key, value] of Object.entries(b)) {
+            if (key.includes('AuM') || key.includes('AUM') || key.includes('aum')) {
+              aumB = parseFloat(String(value).replace(',', '.')) || 0;
+              break;
+            }
+          }
+          
+          return (aumB || 0) - (aumA || 0);
+        case 'ter':
+          const terA = parseFloat(a.TER) || 0;
+          const terB = parseFloat(b.TER) || 0;
+          return terA - terB;
+        case 'name':
+          return a.Nome.localeCompare(b.Nome);
+        default:
+          return 0;
+      }
+    });
+    return sorted;
+  };
+
+  const groupedData = useMemo(() => {
+    const grouped = {
+      bonds: [],
+      equity: [],
+      commodities: [],
+      real_estate: []
     };
     
-    const favoritesByCategory = checkFavoritesByCategory();
-    const missingCategories = Object.entries(favoritesByCategory)
-      .filter(([_, hasFavorites]) => !hasFavorites)
-      .map(([category]) => macroCategories[category].name);
+    if (!uploadedData || uploadedData.length === 0) {
+      return grouped;
+    }
     
-    // Se mancano preferiti in alcune categorie, mostra avviso
-    if (missingCategories.length > 0) {
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center">
-          <div className="max-w-2xl mx-auto px-6">
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-8 border border-yellow-500/50 text-center">
-              <div className="w-24 h-24 bg-gradient-to-br from-yellow-500 to-amber-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                <svg className="w-12 h-12 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                </svg>
+    uploadedData.forEach(etf => {
+      const category = etf.macroCategory;
+      if (grouped[category]) {
+        grouped[category].push(etf);
+      }
+    });
+    
+    // Applica filtri e ordinamento per ogni categoria
+    Object.keys(grouped).forEach(category => {
+      const filtered = getFilteredDataByCategory(grouped[category], category);
+      grouped[category] = getSortedDataByCategory(filtered, category);
+    });
+    
+    return grouped;
+  }, [uploadedData, filters]);
+
+  const totalAllocation = Object.values(allocations).reduce((sum, val) => sum + val, 0);
+  const allocationStatus = totalAllocation === 100 ? 'perfect' : totalAllocation < 100 ? 'under' : 'over';
+
+  const pieData = Object.entries(allocations).map(([key, value]) => ({
+    name: macroCategories[key].name,
+    value: value,
+    color: macroCategories[key].color
+  })).filter(item => item.value > 0);
+  
+  if (totalAllocation < 100) {
+    pieData.push({
+      name: 'Non allocato',
+      value: 100 - totalAllocation,
+      color: '#1F2937'
+    });
+  }
+
+  const handleAllocationChange = (category, value) => {
+    const newValue = Math.max(0, Math.min(100, value));
+    
+    if (newValue === 0 && allocations[category] > 0) {
+      setSelectedETFs(prev => ({
+        ...prev,
+        [category]: {}
+      }));
+    }
+    
+    setAllocations(prev => ({
+      ...prev,
+      [category]: newValue
+    }));
+  };
+
+  const toggleETFSelection = (category, etfId) => {
+    setSelectedETFs(prev => ({
+      ...prev,
+      [category]: {
+        ...prev[category],
+        [etfId]: prev[category][etfId] ? undefined : { weight: 0 }
+      }
+    }));
+  };
+
+  const updateETFWeight = (category, etfId, weight) => {
+    setSelectedETFs(prev => ({
+      ...prev,
+      [category]: {
+        ...prev[category],
+        [etfId]: { weight: Math.max(0, Math.min(100, weight)) }
+      }
+    }));
+  };
+
+  const getCategoryWeight = (category) => {
+    const etfs = selectedETFs[category];
+    return Object.values(etfs).reduce((sum, etf) => sum + (etf?.weight || 0), 0);
+  };
+
+  const toggleStar = (etfId) => {
+    setStarredETFs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(etfId)) {
+        newSet.delete(etfId);
+      } else {
+        newSet.add(etfId);
+      }
+      return newSet;
+    });
+  };
+
+  const calculateWeightedTER = () => {
+    let totalWeight = 0;
+    let weightedTER = 0;
+
+    Object.entries(selectedETFs).forEach(([category, etfs]) => {
+      if (allocations[category] >= 1) {
+        const categoryAllocation = allocations[category] / 100;
+        Object.entries(etfs).forEach(([etfId, etfData]) => {
+          if (etfData && etfData.weight > 0) {
+            const etf = uploadedData?.find(e => e.id === etfId);
+            if (etf) {
+              const effectiveWeight = (etfData.weight / 100) * categoryAllocation;
+              const ter = getTERValue(etf) || 0;
+              
+              totalWeight += effectiveWeight;
+              weightedTER += effectiveWeight * ter;
+            }
+          }
+        });
+      }
+    });
+
+    return totalWeight > 0 ? (weightedTER / totalWeight).toFixed(2) : '0.00';
+  };
+
+  const getSelectedETFsCount = () => {
+    let count = 0;
+    Object.entries(selectedETFs).forEach(([category, etfs]) => {
+      if (allocations[category] >= 1) {
+        count += Object.keys(etfs).length;
+      }
+    });
+    return count;
+  };
+
+  const getPortfolioCoverage = () => {
+    let coverage = 0;
+    Object.entries(allocations).forEach(([category, allocation]) => {
+      if (allocation >= 1) {
+        const categoryWeight = getCategoryWeight(category);
+        if (categoryWeight === 100) {
+          coverage += allocation;
+        }
+      }
+    });
+    return coverage;
+  };
+
+  // Controlla se il portafoglio è completo
+  const isPortfolioComplete = () => {
+    // Il portafoglio è completo quando:
+    // 1. La copertura totale è 100% (tutte le categorie allocate hanno ETF che sommano al 100%)
+    // 2. Ci sono ETF selezionati
+    // 3. L'allocazione totale è 100%
+    return getPortfolioCoverage() === 100 && 
+           getSelectedETFsCount() > 0 && 
+           totalAllocation === 100;
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white p-8">
+      {/* Export View */}
+      {showExportView ? (
+        <div className="max-w-7xl mx-auto">
+          <div className="bg-gray-800 rounded-2xl p-8">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
+                  Riepilogo Portafoglio ETF
+                </h2>
+                <p className="text-gray-400 mt-2">
+                  Data creazione: {new Date().toLocaleDateString('it-IT', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                </p>
               </div>
-              
-              <h2 className="text-3xl font-bold text-yellow-400 mb-4">
-                ETF Preferiti Mancanti
-              </h2>
-              
-              <p className="text-lg text-gray-300 mb-6">
-                Per creare un portafoglio con ETF preferiti, devi avere almeno un ETF starred per ogni categoria.
-              </p>
-              
-              <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4 mb-6">
-                <h3 className="text-lg font-semibold text-red-400 mb-2">
-                  Categorie senza preferiti:
+              <button 
+                onClick={() => setShowExportView(false)}
+                className="text-gray-400 hover:text-white transition-colors p-2 hover:bg-gray-700 rounded-lg"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            
+            {/* Main Content Grid */}
+            <div className="grid grid-cols-2 gap-8 mb-8">
+              {/* Grafico a Torta Allocazione */}
+              <div className="bg-gray-900 rounded-xl p-6 border border-gray-700">
+                <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
+                  <PieChart className="w-5 h-5 text-blue-400" />
+                  Allocazione Asset
                 </h3>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {missingCategories.map((category, idx) => (
-                    <span key={idx} className="px-3 py-1 bg-red-600/20 text-red-300 rounded-full text-sm">
-                      {category}
-                    </span>
-                  ))}
+                <ResponsiveContainer width="100%" height={350}>
+                  <PieChart>
+                    <Pie
+                      data={Object.entries(allocations).filter(([_, value]) => value > 0).map(([key, value]) => ({
+                        name: macroCategories[key].name,
+                        value: value,
+                        color: macroCategories[key].color
+                      }))}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={({name, value}) => `${name}: ${value}%`}
+                      outerRadius={120}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {Object.entries(allocations).filter(([_, value]) => value > 0).map(([key, value], index) => (
+                        <Cell key={`cell-${index}`} fill={macroCategories[key].color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '8px' }}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      iconType="circle"
+                      wrapperStyle={{ paddingTop: '20px' }}
+                      formatter={(value, entry) => (
+                        <span style={{ color: entry.color }}>{value}</span>
+                      )}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Analisi Costi */}
+              <div className="bg-gray-900 rounded-xl p-6 border border-gray-700">
+                <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 text-green-400" />
+                  Analisi Costi Annuali
+                </h3>
+                <div className="space-y-6">
+                  <div>
+                    <div className="flex justify-between items-baseline mb-2">
+                      <span className="text-gray-400">TER Medio Ponderato</span>
+                      <span className="text-3xl font-bold text-yellow-400">
+                        {calculateWeightedTER()}%
+                      </span>
+                    </div>
+                    <div className="h-3 bg-gray-700 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-green-500 to-yellow-500 transition-all duration-500"
+                        style={{ width: `${Math.min(parseFloat(calculateWeightedTER()) * 100, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="border-t border-gray-700 pt-6">
+                    <h4 className="font-medium mb-4 text-gray-300">Costo annuo su diversi importi:</h4>
+                    <div className="space-y-3">
+                      {[10000, 50000, 100000, 500000].map(amount => {
+                        const annualCost = (amount * parseFloat(calculateWeightedTER()) / 100).toFixed(2);
+                        return (
+                          <div key={amount} className="flex justify-between items-center p-3 bg-gray-800 rounded-lg">
+                            <span className="text-gray-400">
+                              Su €{amount.toLocaleString('it-IT')}
+                            </span>
+                            <span className="font-semibold text-lg">
+                              €{parseFloat(annualCost).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
-              
-              <div className="space-y-3">
-                <button
-                  disabled
-                  className="w-full px-6 py-3 bg-gray-600 text-gray-400 font-bold rounded-xl cursor-not-allowed opacity-50"
-                >
-                  Vai al Builder per Selezionare ETF ⭐
-                </button>
-                
-                <button
-                  onClick={() => setCurrentView('selection')}
-                  className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-xl transition-all duration-300"
-                >
-                  Torna alla Selezione
-                </button>
+            </div>
+
+            {/* Grafico a Barre ETF */}
+            <div className="bg-gray-900 rounded-xl p-6 border border-gray-700 mb-8">
+              <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-purple-400" />
+                Composizione Dettagliata Portafoglio
+              </h3>
+              <ResponsiveContainer width="100%" height={400}>
+                <PieChart>
+                  <Pie
+                    data={(() => {
+                      const etfData = [];
+                      // Ordine fisso delle categorie per raggruppamento
+                      const categoryOrder = ['bonds', 'equity', 'commodities', 'real_estate'];
+                      
+                      categoryOrder.forEach(category => {
+                        if (allocations[category] > 0 && selectedETFs[category]) {
+                          // Raccogli tutti gli ETF di questa categoria
+                          const categoryETFs = [];
+                          Object.entries(selectedETFs[category]).forEach(([etfId, etfInfo]) => {
+                            if (etfInfo && etfInfo.weight > 0) {
+                              const etf = uploadedData.find(e => e.id === etfId);
+                              if (etf) {
+                                categoryETFs.push({
+                                  name: etf.Nome,
+                                  value: (etfInfo.weight / 100) * allocations[category],
+                                  category: category,
+                                  color: macroCategories[category].color,
+                                  ter: etf.TER,
+                                  isin: etf.ISIN
+                                });
+                              }
+                            }
+                          });
+                          // Ordina gli ETF all'interno della categoria per peso decrescente
+                          categoryETFs.sort((a, b) => b.value - a.value);
+                          // Aggiungi al data array principale
+                          etfData.push(...categoryETFs);
+                        }
+                      });
+                      return etfData;
+                    })()}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={140}
+                    dataKey="value"
+                    label={({name, value}) => value >= 5 ? `${value.toFixed(1)}%` : ''}
+                    labelLine={false}
+                  >
+                    {(() => {
+                      const etfData = [];
+                      // Stesso ordinamento per le celle
+                      const categoryOrder = ['bonds', 'equity', 'commodities', 'real_estate'];
+                      
+                      categoryOrder.forEach(category => {
+                        if (allocations[category] > 0 && selectedETFs[category]) {
+                          const categoryETFs = [];
+                          Object.entries(selectedETFs[category]).forEach(([etfId, etfInfo]) => {
+                            if (etfInfo && etfInfo.weight > 0) {
+                              const etf = uploadedData.find(e => e.id === etfId);
+                              if (etf) {
+                                categoryETFs.push({
+                                  name: etf.Nome,
+                                  value: (etfInfo.weight / 100) * allocations[category],
+                                  category: category,
+                                  color: macroCategories[category].color
+                                });
+                              }
+                            }
+                          });
+                          categoryETFs.sort((a, b) => b.value - a.value);
+                          etfData.push(...categoryETFs);
+                        }
+                      });
+                      
+                      // Assegna opacità diverse per distinguere ETF della stessa categoria
+                      return etfData.map((entry, index) => {
+                        // Conta quanti ETF della stessa categoria ci sono prima di questo
+                        const sameCategoryBefore = etfData.slice(0, index).filter(e => e.category === entry.category).length;
+                        // Alterna l'opacità per ETF della stessa categoria
+                        const opacity = sameCategoryBefore % 2 === 0 ? 0.9 : 0.7;
+                        
+                        return (
+                          <Cell key={`cell-${index}`} fill={entry.color} opacity={opacity} />
+                        );
+                      });
+                    })()}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: '#FFFFFF', 
+                      border: '1px solid #E5E7EB', 
+                      borderRadius: '8px',
+                      padding: '8px 12px',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+                    }}
+                    labelStyle={{
+                      color: '#1F2937',
+                      fontWeight: '600',
+                      fontSize: '14px'
+                    }}
+                    itemStyle={{
+                      color: '#1F2937',
+                      fontSize: '14px'
+                    }}
+                    formatter={(value, name) => {
+                      return null; // Usiamo solo il label
+                    }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Tabella Riassuntiva */}
+            <div className="bg-gray-900 rounded-xl p-6 border border-gray-700">
+              <h3 className="text-xl font-semibold mb-6 flex items-center gap-2">
+                <FileText className="w-5 h-5 text-cyan-400" />
+                Dettaglio ETF Selezionati
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-700">
+                      <th className="text-left py-3 px-4 text-gray-400 font-medium">Categoria</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-medium">Nome ETF</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-medium">ISIN</th>
+                      <th className="text-right py-3 px-4 text-gray-400 font-medium">Peso %</th>
+                      <th className="text-right py-3 px-4 text-gray-400 font-medium">TER %</th>
+                      <th className="text-right py-3 px-4 text-gray-400 font-medium">AuM (M€)</th>
+                      <th className="text-left py-3 px-4 text-gray-400 font-medium">Valuta</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(selectedETFs).map(([category, etfs]) => {
+                      if (allocations[category] > 0) {
+                        return Object.entries(etfs).map(([etfId, etfInfo]) => {
+                          if (etfInfo && etfInfo.weight > 0) {
+                            const etf = uploadedData.find(e => e.id === etfId);
+                            if (etf) {
+                              const effectiveWeight = (etfInfo.weight / 100) * allocations[category];
+                              return (
+                                <tr key={etfId} className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors">
+                                  <td className="py-3 px-4">
+                                    <span className="flex items-center gap-2">
+                                      <span className="text-lg">{macroCategories[category].icon}</span>
+                                      <span style={{ color: macroCategories[category].colorLight }}>
+                                        {macroCategories[category].name}
+                                      </span>
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 font-medium">{etf.Nome}</td>
+                                  <td className="py-3 px-4 text-gray-400 font-mono text-sm">{etf.ISIN}</td>
+                                  <td className="py-3 px-4 text-right font-semibold">
+                                    {effectiveWeight.toFixed(2)}%
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    {(() => {
+                                      const terValue = getTERValue(etf);
+                                      return terValue !== null ? terValue.toFixed(2) : 'N/D';
+                                    })()}
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    {(() => {
+                                      const aumValue = getAuMValue(etf);
+                                      if (aumValue) {
+                                        const numStr = String(aumValue).replace(/[^\d.,\-]/g, '').replace(',', '.');
+                                        const num = parseFloat(numStr);
+                                        return !isNaN(num) ? num.toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : 'N/D';
+                                      }
+                                      return 'N/D';
+                                    })()}
+                                  </td>
+                                  <td className="py-3 px-4">{etf.Valuta || 'N/D'}</td>
+                                </tr>
+                              );
+                            }
+                          }
+                        });
+                      }
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-gray-700">
+                      <td colSpan="3" className="py-3 px-4 font-semibold">Totale</td>
+                      <td className="py-3 px-4 text-right font-bold text-lg">100.00%</td>
+                      <td className="py-3 px-4 text-right font-bold text-lg text-yellow-400">
+                        {calculateWeightedTER()}%
+                      </td>
+                      <td colSpan="2"></td>
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-center gap-4 mt-8">
+              <button
+                onClick={() => {
+                  // Qui potresti implementare il download CSV
+                  alert('Funzionalità di export CSV in arrivo!');
+                }}
+                className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+              >
+                <Download className="w-5 h-5" />
+                Scarica CSV
+              </button>
+              <button
+                onClick={() => {
+                  // Qui potresti implementare la condivisione
+                  alert('Funzionalità di condivisione in arrivo!');
+                }}
+                className="flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors"
+              >
+                <Share2 className="w-5 h-5" />
+                Condividi
+              </button>
+              <button
+                onClick={() => setShowExportView(false)}
+                className="flex items-center gap-2 px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
+              >
+                Chiudi
+              </button>
             </div>
           </div>
         </div>
-      );
-    }
-    
-    // Se ci sono preferiti in tutte le categorie, mostra il builder con solo ETF preferiti
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
-        <div className="container mx-auto px-6 py-8">
-          <div className="text-center mb-12">
-            <h1 className="text-6xl font-bold bg-gradient-to-r from-yellow-400 via-amber-500 to-orange-400 bg-clip-text text-transparent mb-4">
-              ETF STARRED Portfolio ⭐
-            </h1>
-            <p className="text-xl text-gray-300">Crea il tuo portafoglio usando solo i tuoi ETF preferiti</p>
-            <div className="mt-4">
-              <button
-                onClick={() => setCurrentView('selection')}
-                className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-all duration-300"
-              >
-                ← Torna alla selezione
-              </button>
-              <span className="ml-4 text-sm text-yellow-400">
-                {favoriteETFs.size} ETF preferiti selezionati
-              </span>
+      ) : (
+        <div className="max-w-[1920px] mx-auto">
+        {/* Header */}
+        <div className="mb-10">
+          <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
+            ETF Portfolio Creator
+          </h1>
+          <p className="text-gray-400 text-lg">Crea e ottimizza il tuo portafoglio di ETF - Versione Desktop</p>
+        </div>
+
+        {/* Upload Section */}
+        {!uploadedData || uploadedData.length === 0 ? (
+          <div className="bg-gray-800 rounded-xl p-12 mb-10 border border-gray-700 max-w-3xl mx-auto">
+            <div className="text-center">
+              <Upload className="w-24 h-24 mx-auto mb-6 text-blue-400" />
+              <h2 className="text-3xl font-semibold mb-6">Carica il Database ETF</h2>
+              <label className="cursor-pointer">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => {
+                    handleFileUpload(e);
+                  }}
+                  className="hidden"
+                />
+                <div className="inline-block bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-lg transition-colors text-lg">
+                  Seleziona file CSV
+                </div>
+              </label>
+              <div className="text-gray-400 mt-6 text-left max-w-2xl mx-auto">
+                <p className="font-semibold mb-3 text-center">Struttura file CSV richiesta:</p>
+                <div className="bg-gray-900/50 rounded-lg p-4 space-y-2 text-sm">
+                  <div><span className="text-blue-400 font-medium">Nome:</span> nome commerciale dell'ETF</div>
+                  <div><span className="text-blue-400 font-medium">ISIN:</span> codice ISIN dell'ETF</div>
+                  <div><span className="text-blue-400 font-medium">Ticker:</span> codice ticker dell'ETF</div>
+                  <div><span className="text-blue-400 font-medium">Categoria:</span> Obbligazionario, Azionario, Materie Prime, Immobiliare</div>
+                  <div><span className="text-blue-400 font-medium">Categoria Morningstar:</span> classificazione Morningstar dell'ETF</div>
+                  <div><span className="text-blue-400 font-medium">TER:</span> costo annuo di gestione (es. 0,25 per 0.25%)</div>
+                  <div><span className="text-blue-400 font-medium">Valuta:</span> valuta di quotazione (EUR, USD, GBP, ecc.)</div>
+                  <div><span className="text-blue-400 font-medium">AuM (Mln EUR):</span> patrimonio gestito in milioni di EUR (solo numeri)</div>
+                  <div><span className="text-blue-400 font-medium">Distribuzione:</span> Acc/Accumulazione o Dist/Distribuzione</div>
+                  <div><span className="text-blue-400 font-medium">Replica:</span> Fisica, Sintetica, Campionamento o Swap</div>
+                </div>
+              </div>
             </div>
           </div>
+        ) : (
+          <>
+            {/* Database Info Section */}
+            <div className="bg-gray-800 rounded-xl p-6 mb-10 border border-gray-700">
+              <div className="flex justify-between items-center">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 bg-green-500/20 rounded-lg flex items-center justify-center">
+                    <Database className="w-6 h-6 text-green-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-semibold mb-2">
+                      Database ETF Caricato
+                    </h2>
+                    <div className="space-y-1">
+                      {fileName && (
+                        <p className="text-gray-400 text-sm mb-1">
+                          File: <span className="font-medium text-gray-300">{fileName}</span>
+                        </p>
+                      )}
+                      <p className="text-gray-400">
+                        <span className="font-medium text-2xl text-white">{uploadedData?.length || 0}</span> ETF totali nel database
+                      </p>
+                      <div className="flex gap-4 mt-2 text-sm">
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+                          <span className="text-gray-400">Obbligazionari: {uploadedData?.filter(etf => etf.macroCategory === 'bonds').length || 0}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-3 bg-red-500 rounded-full"></span>
+                          <span className="text-gray-400">Azionari: {uploadedData?.filter(etf => etf.macroCategory === 'equity').length || 0}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-3 bg-amber-500 rounded-full"></span>
+                          <span className="text-gray-400">Materie Prime: {uploadedData?.filter(etf => etf.macroCategory === 'commodities').length || 0}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <span className="w-3 h-3 bg-emerald-500 rounded-full"></span>
+                          <span className="text-gray-400">Immobiliare: {uploadedData?.filter(etf => etf.macroCategory === 'real_estate').length || 0}</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <label className={`cursor-pointer ${isLoading ? 'pointer-events-none opacity-50' : ''}`}>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    disabled={isLoading}
+                  />
+                  <div className={`flex items-center gap-2 px-6 py-3 rounded-lg transition-colors group ${
+                    isLoading ? 'bg-gray-600' : 'bg-blue-600 hover:bg-blue-700'
+                  }`}>
+                    <RefreshCw className={`w-5 h-5 transition-transform duration-500 ${isLoading ? 'animate-spin' : 'group-hover:rotate-180'}`} />
+                    <span>{isLoading ? 'Caricamento...' : 'Aggiorna Database'}</span>
+                  </div>
+                </label>
+              </div>
+              {(getSelectedETFsCount() > 0 || totalAllocation > 0) && uploadedData && uploadedData.length > 0 && (
+                <div className="mt-4 p-3 bg-orange-900/20 border border-orange-700/50 rounded-lg">
+                  <p className="text-orange-400 text-sm flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    Attenzione: aggiornando il database perderai le selezioni e allocazioni correnti
+                  </p>
+                </div>
+              )}
+            </div>
 
-          <div className="grid grid-cols-2 gap-8 mb-12">
-            <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 hover:border-gray-600 transition-all duration-300">
-              <h2 className="text-2xl font-bold mb-6 text-center">Macro Asset Class</h2>
+            {/* Mode Selection */}
+            <div className="bg-gray-800 rounded-xl p-8 mb-10 border border-gray-700">
+              <h2 className="text-2xl font-semibold mb-6">Modalità di Creazione</h2>
+              <div className="grid grid-cols-3 gap-6 max-w-4xl">
+                <button
+                  onClick={() => setSelectedMode('custom')}
+                  className={`p-6 rounded-lg border-2 transition-all ${
+                    selectedMode === 'custom'
+                      ? 'border-blue-500 bg-blue-500/20'
+                      : 'border-gray-600 hover:border-gray-500'
+                  }`}
+                >
+                  <div className="font-semibold text-lg">PTF CUSTOM</div>
+                  <div className="text-gray-400 mt-2">Personalizzato</div>
+                </button>
+                <button
+                  disabled
+                  className="p-6 rounded-lg border-2 border-gray-700 opacity-50 cursor-not-allowed"
+                >
+                  <div className="font-semibold text-lg">PTF MODEL</div>
+                  <div className="text-gray-400 mt-2">Pre-configurato</div>
+                </button>
+                <button
+                  disabled
+                  className="p-6 rounded-lg border-2 border-gray-700 opacity-50 cursor-not-allowed"
+                >
+                  <div className="font-semibold text-lg">PTF STARRED</div>
+                  <div className="text-gray-400 mt-2">Preferiti</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Allocation Section */}
+            <div className={`bg-gray-800 rounded-xl p-8 mb-10 border-2 transition-all ${
+              allocationStatus === 'perfect' ? 'border-green-500' : 
+              allocationStatus === 'under' ? 'border-orange-500' : 'border-red-500'
+            }`}>
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-2xl font-semibold">Allocazione Asset</h2>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl font-bold">{totalAllocation}%</span>
+                  {allocationStatus === 'perfect' && <Check className="w-8 h-8 text-green-500" />}
+                  {allocationStatus === 'under' && <AlertCircle className="w-8 h-8 text-orange-500" />}
+                  {allocationStatus === 'over' && <X className="w-8 h-8 text-red-500" />}
+                </div>
+              </div>
               
-              <div className="space-y-6">
-                {Object.entries(macroCategories).map(([key, category]) => (
-                  <div key={key} className="space-y-3">
-                    <label className="flex items-center justify-between text-sm font-medium">
-                      <span className="flex items-center">
-                        <div className="w-4 h-4 rounded-full mr-3" style={{backgroundColor: COLORS[key]}}></div>
-                        {category.name}
-                      </span>
-                      <span className="font-bold text-lg">{allocations[key]}%</span>
-                    </label>
-                    <div className="relative">
-                      <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all duration-700 ease-out"
-                          style={{
-                            width: `${allocations[key]}%`,
-                            backgroundColor: COLORS[key]
-                          }}
-                        />
+              <div className="grid grid-cols-2 gap-12">
+                <div className="space-y-6">
+                  {Object.entries(macroCategories).map(([key, category]) => (
+                    <div key={key}>
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="flex items-center gap-3 text-lg">
+                          <span className="text-2xl">{category.icon}</span>
+                          <span style={{ color: category.colorLight }}>{category.name}</span>
+                        </span>
+                        <span className="font-bold text-xl" style={{ color: category.colorLight }}>
+                          {allocations[key]}%
+                        </span>
                       </div>
                       <input
                         type="range"
                         min="0"
                         max="100"
                         value={allocations[key]}
-                        onChange={(e) => handleAllocationChange(key, e.target.value)}
-                        onInput={(e) => handleAllocationChange(key, e.target.value)}
-                        className="absolute top-0 w-full h-3 opacity-0 cursor-pointer"
-                        style={{ WebkitAppearance: 'none', touchAction: 'none' }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-gray-600">
-                <div className={`text-center text-lg font-bold transition-all duration-500 ${totalAllocation === 100 ? 'text-green-400' : 'text-yellow-400'}`}>
-                  Totale: {totalAllocation}%
-                  {totalAllocation !== 100 && (
-                    <div className="text-sm text-gray-400 mt-1">
-                      {totalAllocation > 100 ? 'Riduci' : 'Aumenta'} di {Math.abs(100 - totalAllocation)}%
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className={`bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border-2 transition-all duration-300 ${
-              totalAllocation === 100 ? 'border-green-500 shadow-green-500/20 shadow-lg' : 
-              totalAllocation > 100 ? 'border-red-500 shadow-red-500/20 shadow-lg' : 
-              'border-orange-500 shadow-orange-500/20 shadow-lg'
-            }`}>
-              <h2 className="text-2xl font-bold mb-6 text-center">Portafoglio</h2>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={50}
-                      outerRadius={110}
-                      paddingAngle={3}
-                      dataKey="value"
-                      animationDuration={1200}
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<CustomTooltip />} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-8 mb-12">
-            {activeMacroCategories.map((macroKey) => {
-              // Filtra solo gli ETF preferiti per questa categoria
-              const starredETFsForCategory = etfData.filter(etf => 
-                etf.categoria_normalized === macroKey && favoriteETFs.has(etf.ISIN)
-              );
-              
-              return (
-                <div key={macroKey} className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-yellow-500/30 hover:border-yellow-500/50 transition-all duration-300">
-                  <div className="flex items-center mb-6">
-                    <div 
-                      className="w-8 h-8 rounded-full mr-4" 
-                      style={{backgroundColor: COLORS[macroKey]}}
-                    ></div>
-                    <h2 className="text-2xl font-bold">
-                      {macroCategories[macroKey].icon} {macroCategories[macroKey].name}
-                    </h2>
-                    <span className="ml-4 text-xl text-gray-400 font-bold px-3 py-1 bg-gray-700 rounded-full">
-                      {allocations[macroKey]}%
-                    </span>
-                    <span className="ml-2 px-3 py-1 bg-yellow-600/20 text-yellow-400 rounded-full text-sm font-bold">
-                      ⭐ {starredETFsForCategory.length}
-                    </span>
-                  </div>
-
-                  <div>
-                    <h3 className="text-lg font-semibold mb-3 flex items-center">
-                      ETF Preferiti Disponibili 
-                      <span className="ml-3 px-3 py-1 bg-yellow-600 text-black rounded-full text-sm font-bold">
-                        ⭐ {starredETFsForCategory.length}
-                      </span>
-                      {Object.keys(selectedETFs[macroKey]).length > 0 && (
-                        <span className="ml-3 px-3 py-1 bg-green-600 text-white rounded-full text-sm font-bold">
-                          📁 {Object.keys(selectedETFs[macroKey]).length}
-                        </span>
-                      )}
-                    </h3>
-                    
-                    {starredETFsForCategory.length > 0 ? (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                        {starredETFsForCategory.map((etf, index) => {
-                          const isSelected = selectedETFs[macroKey][etf.ISIN];
-                          return (
-                            <div 
-                              key={index}
-                              className={`bg-gray-700/50 rounded-lg p-4 border transition-all duration-300 hover:shadow-xl group relative ${
-                                isSelected ? 'border-green-400 bg-green-900/20' :
-                                'border-yellow-400 bg-yellow-900/20'
-                              }`}
-                            >
-                              <div className="absolute top-2 right-2">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleETFInPortfolio(macroKey, etf);
-                                  }}
-                                  className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 font-bold ${
-                                    isSelected 
-                                      ? 'bg-green-600 text-white hover:bg-green-700' 
-                                      : 'bg-gray-600 text-gray-300 hover:bg-green-600 hover:text-white'
-                                  }`}
-                                  title={isSelected ? "Rimuovi dal portafoglio" : "Aggiungi al portafoglio"}
-                                >
-                                  {isSelected ? '✓' : '+'}
-                                </button>
-                              </div>
-
-                              <h4 className="font-medium text-sm mb-2 pr-10 text-blue-300">
-                                <span className="text-yellow-400 mr-1">⭐</span>
-                                {isSelected && <span className="text-green-400 mr-1">✓</span>}
-                                {etf.Nome.length > 30 ? etf.Nome.substring(0, 30) + '...' : etf.Nome}
-                              </h4>
-                              <div className="grid grid-cols-2 gap-2 text-xs">
-                                <div><span className="text-gray-400">TER:</span> <span className="font-bold text-red-400">{etf.TER}%</span></div>
-                                <div><span className="text-gray-400">Valuta:</span> <span className="font-bold text-yellow-400">{etf.Valuta}</span></div>
-                                <div><span className="text-gray-400">AuM:</span> <span className="font-bold text-green-400">{etf.AuM?.toLocaleString()}M€</span></div>
-                                <div><span className="text-gray-400">Tipo:</span> <span className="font-medium text-blue-300">{etf.Distribuzione === 'Accumulazione' ? 'ACC' : etf.Distribuzione === 'Distribuzione' ? 'DIST' : 'N/D'}</span></div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-8 text-gray-400 h-64 flex flex-col items-center justify-center">
-                        <div className="text-4xl mb-4">⭐</div>
-                        Nessun ETF preferito in questa categoria
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {Object.values(selectedETFs).some(category => Object.keys(category).length > 0) && (
-            <div className="bg-gradient-to-br from-yellow-900/20 to-amber-900/20 backdrop-blur-sm rounded-2xl p-6 border border-yellow-500/30 mb-12">
-              <div className="text-center mb-6">
-                <h2 className="text-3xl font-bold bg-gradient-to-r from-yellow-400 to-amber-400 bg-clip-text text-transparent mb-1">
-                  🎯 Il Tuo Portafoglio Starred
-                </h2>
-                <p className="text-gray-300 text-sm">ETF preferiti selezionati e pesi nel portafoglio</p>
-              </div>
-
-              {Object.entries(macroCategories).map(([macroKey, category]) => {
-                const categoryETFs = Object.values(selectedETFs[macroKey]);
-                if (categoryETFs.length === 0) return null;
-
-                return (
-                  <div key={macroKey} className="mb-6 bg-gray-800/30 rounded-xl p-4 border border-gray-600">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-xl font-bold flex items-center">
-                        <div 
-                          className="w-5 h-5 rounded-full mr-2" 
-                          style={{backgroundColor: COLORS[macroKey]}}
-                        ></div>
-                        {category.icon} {category.name}
-                        <span className="ml-2 text-lg" style={{color: COLORS[macroKey]}}>
-                          {allocations[macroKey]}% del portafoglio
-                        </span>
-                        <div className={`ml-3 px-2 py-1 rounded-full text-xs font-bold ${
-                          getTotalWeightForCategory(macroKey) === 100 ? 'bg-green-600 text-white' : 
-                          getTotalWeightForCategory(macroKey) > 100 ? 'bg-red-600 text-white animate-pulse' : 
-                          'bg-yellow-600 text-black'
-                        }`}>
-                          {getTotalWeightForCategory(macroKey)}%
-                          {getTotalWeightForCategory(macroKey) === 100 && (
-                            <span className="ml-1">✓</span>
-                          )}
-                        </div>
-                      </h3>
-                    </div>
-
-                    <div className="space-y-3">
-                      {categoryETFs.map((etf) => {
-                        const effectiveWeight = getEffectiveWeight(macroKey, etf.weight);
-                        const isFavorite = favoriteETFs.has(etf.ISIN);
-                        
-                        return (
-                          <div key={etf.ISIN} className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
-                            <div className="grid grid-cols-12 gap-4 items-center">
-                              
-                              <div className="col-span-5">
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1">
-                                    <h4 className="font-medium text-blue-300 text-sm mb-1">
-                                      {isFavorite && <span className="text-yellow-400 mr-1">⭐</span>}
-                                      {etf.Nome}
-                                    </h4>
-                                    <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-400">
-                                      <div>ISIN: <span className="text-gray-300 font-mono">{etf.ISIN}</span></div>
-                                      <div>Ticker: <span className="text-gray-300 font-mono">{etf.Ticker || 'N/A'}</span></div>
-                                      <div>AuM: <span className="text-green-400 font-bold">{etf.AuM?.toLocaleString()}M€</span></div>
-                                      <div>Valuta: <span className="text-yellow-400 font-bold">{etf.Valuta}</span></div>
-                                      <div>TER: <span className="text-red-400 font-bold">{etf.TER}%</span></div>
-                                      <div>Tipo: <span className="text-blue-300 font-bold">{etf.Distribuzione === 'Accumulazione' ? 'ACC' : etf.Distribuzione === 'Distribuzione' ? 'DIST' : 'N/D'}</span></div>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={() => toggleETFInPortfolio(macroKey, etf)}
-                                    className="ml-2 text-red-400 hover:text-red-300 text-lg"
-                                    title="Rimuovi"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="col-span-4">
-                                <div className="text-center mb-2">
-                                  <div className="text-xs text-gray-400 mb-1">Peso in {category.name}</div>
-                                  <div className="text-2xl font-bold text-blue-400">{etf.weight}%</div>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                  <button
-                                    onClick={() => updateETFWeight(macroKey, etf.ISIN, Math.max(1, etf.weight - 5))}
-                                    className="w-8 h-8 bg-gray-600 hover:bg-gray-500 rounded-full text-white font-bold text-sm"
-                                  >
-                                    −
-                                  </button>
-                                  <input
-                                    type="range"
-                                    min="1"
-                                    max="100"
-                                    value={etf.weight}
-                                    onChange={(e) => updateETFWeight(macroKey, etf.ISIN, e.target.value)}
-                                    onInput={(e) => updateETFWeight(macroKey, etf.ISIN, e.target.value)}
-                                    className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                                    style={{ WebkitAppearance: 'none', touchAction: 'none' }}
-                                  />
-                                  <button
-                                    onClick={() => updateETFWeight(macroKey, etf.ISIN, Math.min(100, etf.weight + 5))}
-                                    className="w-8 h-8 bg-gray-600 hover:bg-gray-500 rounded-full text-white font-bold text-sm"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="col-span-3">
-                                <div className="text-center bg-green-900/30 rounded-lg p-3 border border-green-500/30">
-                                  <div className="text-xs text-green-300">Peso Totale</div>
-                                  <div className="text-2xl font-bold text-green-400">
-                                    {effectiveWeight.toFixed(2)}%
-                                  </div>
-                                  <div className="text-xs text-green-200">
-                                    ({etf.weight}% di {allocations[macroKey]}%)
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-
-              <div className="bg-yellow-900/20 rounded-xl p-4 border border-yellow-500/30 text-center">
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <div className="text-2xl font-bold text-yellow-400">
-                      {Object.values(selectedETFs).reduce((total, category) => total + Object.keys(category).length, 0)}
-                    </div>
-                    <div className="text-sm text-gray-400">ETF Starred Selezionati</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-green-400">
-                      {Object.values(selectedETFs).reduce((total, category) => {
-                        return total + Object.values(category).reduce((catTotal, etf) => 
-                          catTotal + getEffectiveWeight(
-                            Object.keys(selectedETFs).find(key => selectedETFs[key][etf.ISIN]), 
-                            etf.weight
-                          ), 0
-                        );
-                      }, 0).toFixed(0)}%
-                    </div>
-                    <div className="text-sm text-gray-400">Copertura Totale</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-yellow-400">
-                      {Object.values(selectedETFs).reduce((total, category) => {
-                        return total + Object.values(category).reduce((catTotal, etf) => 
-                          catTotal + (etf.TER * getEffectiveWeight(
-                            Object.keys(selectedETFs).find(key => selectedETFs[key][etf.ISIN]), 
-                            etf.weight
-                          ) / 100), 0
-                        );
-                      }, 0).toFixed(2)}%
-                    </div>
-                    <div className="text-sm text-gray-400">TER Medio</div>
-                  </div>
-                </div>
-              </div>
-
-              {Object.values(selectedETFs).some(category => Object.keys(category).length > 0) && (
-                <div className="text-center mt-8">
-                  <button
-                    disabled
-                    className="px-12 py-4 text-xl font-bold rounded-2xl bg-gray-600 text-gray-400 cursor-not-allowed opacity-50"
-                  >
-                    {isPortfolioComplete() ? '🎯 PORTAFOGLIO STARRED CREATO' : '⚠️ Bilancia tutte le categorie al 100%'}
-                  </button>
-                  {!isPortfolioComplete() && (
-                    <p className="text-sm text-yellow-400 mt-2">
-                      Assicurati che ogni categoria abbia ETF con pesi che sommano al 100%
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const UploadScreen = () => (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center">
-      <div className="max-w-2xl mx-auto px-6">
-        <div className="text-center mb-12">
-          <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-400 via-purple-500 to-red-400 bg-clip-text text-transparent mb-4">
-            ETF Portfolio Creator
-          </h1>
-          <p className="text-xl text-gray-300 mb-2">Crea il tuo portafoglio ETF personalizzato</p>
-          <p className="text-gray-400">Carica il tuo database di ETF per iniziare</p>
-        </div>
-
-        <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-8 border border-gray-700">
-          <div className="text-center mb-8">
-            <div className="w-24 h-24 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
-              <svg className="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-            </div>
-            <h2 className="text-3xl font-bold mb-4">Carica il tuo Database ETF</h2>
-            <p className="text-gray-300 mb-6">
-              Seleziona un file CSV contenente i dati degli ETF che vuoi analizzare
-            </p>
-          </div>
-
-          <div className="mb-6">
-            <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-gray-600 border-dashed rounded-lg cursor-pointer bg-gray-700/30 hover:bg-gray-700/50 transition-all duration-300">
-              <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <svg className="w-10 h-10 mb-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                </svg>
-                <p className="mb-2 text-sm text-gray-300">
-                  <span className="font-semibold">Clicca per caricare</span> o trascina il file qui
-                </p>
-                <p className="text-xs text-gray-400">CSV (MAX. 10MB)</p>
-              </div>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileUpload}
-                className="hidden"
-                disabled={loading}
-              />
-            </label>
-          </div>
-
-          {uploadError && (
-            <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg">
-              <div className="flex items-center">
-                <svg className="w-5 h-5 text-red-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-red-300">{uploadError}</span>
-              </div>
-            </div>
-          )}
-
-          <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-6">
-            <h3 className="text-lg font-semibold mb-3 text-blue-300">📋 Formato CSV Richiesto</h3>
-            <p className="text-sm text-gray-300 mb-3">Il file CSV deve contenere almeno queste colonne:</p>
-            <div className="grid grid-cols-2 gap-2 text-sm font-mono text-gray-400">
-              <div>• Nome</div>
-              <div>• ISIN</div>
-              <div>• Categoria</div>
-              <div>• Categoria Morningstar</div>
-              <div>• TER</div>
-              <div>• Valuta</div>
-            </div>
-            <p className="text-xs text-gray-400 mt-3">
-              Colonne opzionali: AuM, Distribuzione, Replica, Ticker, SGR
-            </p>
-          </div>
-
-          {loading && (
-            <div className="mt-6 flex items-center justify-center">
-              <div className="relative">
-                <div className="w-8 h-8 border-4 border-blue-200 rounded-full animate-spin"></div>
-                <div className="w-8 h-8 border-4 border-blue-600 rounded-full animate-spin absolute top-0 left-0 border-t-transparent border-r-transparent"></div>
-              </div>
-              <span className="ml-3 text-gray-300">Caricamento in corso...</span>
-            </div>
-          )}
-        </div>
-
-        <div className="text-center mt-8">
-          <p className="text-gray-400 text-sm">
-            Dopo il caricamento potrai filtrare, selezionare e creare il tuo portafoglio ETF personalizzato
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-
-  const SelectionScreen = () => (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center">
-      <div className="max-w-7xl mx-auto px-6">
-        <div className="text-center mb-8">
-          <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-purple-500 to-red-400 bg-clip-text text-transparent mb-3">
-            ETF Portfolio Creator
-          </h1>
-          <p className="text-lg text-gray-300 mb-1">Database caricato con successo!</p>
-          <p className="text-gray-400 mb-3">{etfData.length} ETF disponibili per la creazione del portafoglio</p>
-          <button
-            onClick={() => setCurrentView('upload')}
-            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-all duration-300"
-          >
-            ← Carica un altro database
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 gap-6">
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700 hover:border-blue-500 transition-all duration-300 transform hover:scale-105 cursor-pointer group"
-               onClick={() => setCurrentView('builder')}>
-            <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center mb-4 group-hover:shadow-xl transition-all duration-300">
-                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-bold mb-2 group-hover:text-blue-400 transition-colors duration-300">
-                PTF CUSTOM
-              </h2>
-              <p className="text-gray-300 text-sm mb-3">
-                Portafoglio completamente personalizzato
-              </p>
-              <div className="space-y-1 text-xs text-gray-400">
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Controllo totale
-                </div>
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Filtri avanzati
-                </div>
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Selezione manuale
-                </div>
-              </div>
-              <div className="mt-4">
-                <span className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg inline-block text-sm group-hover:shadow-lg transition-all duration-300">
-                  Crea Custom →
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700 opacity-50 cursor-not-allowed group">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-gradient-to-br from-gray-600 to-gray-700 rounded-xl flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-bold mb-2 text-gray-500">
-                PTF MODEL
-              </h2>
-              <p className="text-gray-500 text-sm mb-3">
-                Portafogli pre-configurati e ottimizzati
-              </p>
-              <div className="space-y-1 text-xs text-gray-600">
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Pronti all'uso
-                </div>
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  Strategie testate
-                </div>
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Setup veloce
-                </div>
-              </div>
-              <div className="mt-4">
-                <span className="px-4 py-2 bg-gray-600 text-gray-400 font-semibold rounded-lg inline-block text-sm">
-                  Non Disponibile →
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl p-6 border border-gray-700 opacity-50 cursor-not-allowed group">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-16 h-16 bg-gradient-to-br from-gray-600 to-gray-700 rounded-xl flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                </svg>
-              </div>
-              <h2 className="text-xl font-bold mb-2 text-gray-500">
-                PTF STARRED ⭐
-              </h2>
-              <p className="text-gray-500 text-sm mb-3">
-                Portafoglio con i tuoi ETF preferiti
-              </p>
-              <div className="space-y-1 text-xs text-gray-600">
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  Selezione rapida
-                </div>
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  ETF salvati
-                </div>
-                <div className="flex items-center">
-                  <svg className="w-3 h-3 mr-1.5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                  </svg>
-                  Personalizzato
-                </div>
-              </div>
-              <div className="mt-4">
-                <span className="px-4 py-2 bg-gray-600 text-gray-400 font-semibold rounded-lg inline-block text-sm">
-                  Non Disponibile →
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (currentView === 'upload') {
-    return <UploadScreen />;
-  }
-
-  if (currentView === 'selection') {
-    return <SelectionScreen />;
-  }
-
-  if (currentView === 'predefined') {
-    return <PredefinedPortfoliosScreen />;
-  }
-
-  if (currentView === 'starred') {
-    return <StarredPortfolioScreen />;
-  }
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 flex flex-col items-center justify-center">
-        <div className="relative">
-          <div className="w-16 h-16 border-4 border-blue-200 rounded-full animate-spin"></div>
-          <div className="w-16 h-16 border-4 border-blue-600 rounded-full animate-spin absolute top-0 left-0 border-t-transparent border-r-transparent"></div>
-        </div>
-        <div className="text-white text-xl mt-6 animate-pulse">Caricamento dati ETF...</div>
-        <div className="text-gray-400 text-sm mt-2 animate-bounce">Preparazione portafoglio</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white">
-      <div className="container mx-auto px-6 py-8">
-        <div className="text-center mb-12">
-          <h1 className="text-6xl font-bold bg-gradient-to-r from-blue-400 via-purple-500 to-red-400 bg-clip-text text-transparent mb-4">
-            ETF CUSTOM Portfolio
-          </h1>
-          <p className="text-xl text-gray-300">Crea il tuo portafoglio ETF personalizzato</p>
-          <div className="mt-4">
-            <button
-              onClick={() => setCurrentView('selection')}
-              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-all duration-300"
-            >
-              ← Torna alla selezione
-            </button>
-            <span className="ml-4 text-sm text-gray-400">
-              {etfData.length} ETF caricati
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-8 mb-12">
-          <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 hover:border-gray-600 transition-all duration-300">
-            <h2 className="text-2xl font-bold mb-6 text-center">Macro Asset Class</h2>
-            
-            <div className="space-y-6">
-              {Object.entries(macroCategories).map(([key, category]) => (
-                <div key={key} className="space-y-3">
-                  <label className="flex items-center justify-between text-sm font-medium">
-                    <span className="flex items-center">
-                      <div className="w-4 h-4 rounded-full mr-3" style={{backgroundColor: COLORS[key]}}></div>
-                      {category.name}
-                    </span>
-                    <span className="font-bold text-lg">{allocations[key]}%</span>
-                  </label>
-                  <div className="relative">
-                    <div className="w-full h-3 bg-gray-700 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full rounded-full transition-all duration-700 ease-out"
+                        onChange={(e) => handleAllocationChange(key, parseInt(e.target.value))}
+                        className="w-full h-3 rounded-lg"
                         style={{
-                          width: `${allocations[key]}%`,
-                          backgroundColor: COLORS[key]
+                          background: `linear-gradient(to right, ${category.color} 0%, ${category.color} ${allocations[key]}%, #374151 ${allocations[key]}%, #374151 100%)`
                         }}
                       />
                     </div>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      value={allocations[key]}
-                      onChange={(e) => handleAllocationChange(key, e.target.value)}
-                      className="absolute top-0 w-full h-3 opacity-0 cursor-pointer"
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 pt-4 border-t border-gray-600">
-              <div className={`text-center text-lg font-bold transition-all duration-500 ${totalAllocation === 100 ? 'text-green-400' : 'text-yellow-400'}`}>
-                Totale: {totalAllocation}%
-                {totalAllocation !== 100 && (
-                  <div className="text-sm text-gray-400 mt-1">
-                    {totalAllocation > 100 ? 'Riduci' : 'Aumenta'} di {Math.abs(100 - totalAllocation)}%
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className={`bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border-2 transition-all duration-300 ${
-            totalAllocation === 100 ? 'border-green-500 shadow-green-500/20 shadow-lg' : 
-            totalAllocation > 100 ? 'border-red-500 shadow-red-500/20 shadow-lg' : 
-            'border-orange-500 shadow-orange-500/20 shadow-lg'
-          }`}>
-            <h2 className="text-2xl font-bold mb-6 text-center">Portafoglio</h2>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={110}
-                    paddingAngle={3}
-                    dataKey="value"
-                    animationDuration={1200}
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip content={<CustomTooltip />} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-8 mb-12">
-          {activeMacroCategories.map((macroKey) => (
-            <div key={macroKey} className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700 hover:border-gray-600 transition-all duration-300">
-              <div className="flex items-center mb-6">
-                <div 
-                  className="w-8 h-8 rounded-full mr-4" 
-                  style={{backgroundColor: COLORS[macroKey]}}
-                ></div>
-                <h2 className="text-2xl font-bold">
-                  {macroCategories[macroKey].icon} {macroCategories[macroKey].name}
-                </h2>
-                <span className="ml-4 text-xl text-gray-400 font-bold px-3 py-1 bg-gray-700 rounded-full">
-                  {allocations[macroKey]}%
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 mb-6">
-                <div className="relative group">
-                  <label className="block text-xs font-semibold mb-2 text-gray-300 uppercase tracking-wider">
-                    <span className="inline-flex items-center">
-                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      Distribuzione
-                    </span>
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={categoryPreferences[macroKey].distribuzione}
-                      onChange={(e) => updateCategoryPreference(macroKey, 'distribuzione', e.target.value)}
-                      className="w-full appearance-none bg-gradient-to-br from-gray-700 to-gray-800 border border-gray-600 rounded-xl px-4 py-2.5 pr-10 text-sm text-white shadow-lg hover:shadow-xl transition-all duration-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-gray-500 cursor-pointer"
-                      style={{
-                        backgroundColor: '#1f2937',
-                        color: 'white'
-                      }}
-                    >
-                      <option value="Tutti" style={{backgroundColor: '#1f2937', color: 'white'}}>Tutti</option>
-                      <option value="Distribuzione" style={{backgroundColor: '#1f2937', color: 'white'}}>Distribuzione</option>
-                      <option value="Accumulazione" style={{backgroundColor: '#1f2937', color: 'white'}}>Accumulazione</option>
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="relative group">
-                  <label className="block text-xs font-semibold mb-2 text-gray-300 uppercase tracking-wider">
-                    <span className="inline-flex items-center">
-                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                      </svg>
-                      Replica
-                    </span>
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={categoryPreferences[macroKey].replica}
-                      onChange={(e) => updateCategoryPreference(macroKey, 'replica', e.target.value)}
-                      className="w-full appearance-none bg-gradient-to-br from-gray-700 to-gray-800 border border-gray-600 rounded-xl px-4 py-2.5 pr-10 text-sm text-white shadow-lg hover:shadow-xl transition-all duration-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-gray-500 cursor-pointer"
-                      style={{
-                        backgroundColor: '#1f2937',
-                        color: 'white'
-                      }}
-                    >
-                      <option value="Tutti" style={{backgroundColor: '#1f2937', color: 'white'}}>Tutti</option>
-                      <option value="Totale" style={{backgroundColor: '#1f2937', color: 'white'}}>Totale</option>
-                      <option value="Campionamento" style={{backgroundColor: '#1f2937', color: 'white'}}>Campionamento</option>
-                      <option value="Sintetico" style={{backgroundColor: '#1f2937', color: 'white'}}>Sintetico</option>
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="relative group">
-                  <label className="block text-xs font-semibold mb-2 text-gray-300 uppercase tracking-wider">
-                    <span className="inline-flex items-center">
-                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-                      </svg>
-                      Valuta
-                    </span>
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={categoryPreferences[macroKey].valuta}
-                      onChange={(e) => updateCategoryPreference(macroKey, 'valuta', e.target.value)}
-                      className="w-full appearance-none bg-gradient-to-br from-gray-700 to-gray-800 border border-gray-600 rounded-xl px-4 py-2.5 pr-10 text-sm text-white shadow-lg hover:shadow-xl transition-all duration-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-gray-500 cursor-pointer"
-                      style={{
-                        backgroundColor: '#1f2937',
-                        color: 'white'
-                      }}
-                    >
-                      <option value="Tutti" style={{backgroundColor: '#1f2937', color: 'white'}}>Tutte</option>
-                      <option value="EUR" style={{backgroundColor: '#1f2937', color: 'white'}}>EUR</option>
-                      <option value="USD" style={{backgroundColor: '#1f2937', color: 'white'}}>USD</option>
-                      <option value="GBP" style={{backgroundColor: '#1f2937', color: 'white'}}>GBP</option>
-                      <option value="CHF" style={{backgroundColor: '#1f2937', color: 'white'}}>CHF</option>
-                      <option value="JPY" style={{backgroundColor: '#1f2937', color: 'white'}}>JPY</option>
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="relative group">
-                  <label className="block text-xs font-semibold mb-2 text-gray-300 uppercase tracking-wider">
-                    <span className="inline-flex items-center">
-                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-                      </svg>
-                      Ordine
-                    </span>
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={categoryPreferences[macroKey].sortOrder}
-                      onChange={(e) => updateCategoryPreference(macroKey, 'sortOrder', e.target.value)}
-                      className="w-full appearance-none bg-gradient-to-br from-gray-700 to-gray-800 border border-gray-600 rounded-xl px-4 py-2.5 pr-10 text-sm text-white shadow-lg hover:shadow-xl transition-all duration-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent hover:border-gray-500 cursor-pointer"
-                      style={{
-                        backgroundColor: '#1f2937',
-                        color: 'white'
-                      }}
-                    >
-                      <option value="aum_desc" style={{backgroundColor: '#1f2937', color: 'white'}}>AuM Decrescente</option>
-                      <option value="ter_desc" style={{backgroundColor: '#1f2937', color: 'white'}}>TER Decrescente</option>
-                      <option value="alfabetico" style={{backgroundColor: '#1f2937', color: 'white'}}>Alfabetico</option>
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                      <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mb-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold">Categorie</h3>
-                  <button
-                    onClick={() => toggleAllCategoriesForMacro(macroKey)}
-                    className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-lg text-sm font-medium transition-all duration-300"
-                  >
-                    {categoryPreferences[macroKey].selectedCategories.size === categoriesByMacro[macroKey].length 
-                      ? 'Deseleziona Tutte' : 'Seleziona Tutte'}
-                  </button>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-32 overflow-y-auto">
-                  {categoriesByMacro[macroKey].map((category) => (
-                    <label 
-                      key={category}
-                      className="flex items-center space-x-3 p-3 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 cursor-pointer transition-all duration-300"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={categoryPreferences[macroKey].selectedCategories.has(category)}
-                        onChange={() => toggleMorningstarCategory(macroKey, category)}
-                        className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500 focus:ring-2"
-                      />
-                      <span className="text-sm text-gray-200">{category}</span>
-                    </label>
                   ))}
                 </div>
                 
-                <div className="mt-3 text-sm text-gray-400">
-                  {categoryPreferences[macroKey].selectedCategories.size} di {categoriesByMacro[macroKey].length} categorie selezionate
+                <div className="flex items-center justify-center bg-gray-900/50 rounded-xl p-8">
+                  <ResponsiveContainer width="100%" height={400}>
+                    <PieChart>
+                      <defs>
+                        <pattern id="diagonalHatch" patternUnits="userSpaceOnUse" width="10" height="10">
+                          <path d="M0,10 l10,-10 M-5,5 l10,-10 M5,15 l10,-10" stroke="#374151" strokeWidth="1"/>
+                        </pattern>
+                      </defs>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={80}
+                        outerRadius={140}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={entry.name === 'Non allocato' ? 'url(#diagonalHatch)' : entry.color} 
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#1F2937', border: 'none', borderRadius: '8px' }}
+                        formatter={(value, name) => {
+                          if (name === 'Non allocato') {
+                            return [`${value}%`, 'Da allocare'];
+                          }
+                          return [`${value}%`, name];
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
+            </div>
 
-              <div>
-                <h3 className="text-lg font-semibold mb-3 flex items-center">
-                  ETF Disponibili 
-                  <span className="ml-3 px-3 py-1 bg-blue-600 text-white rounded-full text-sm font-bold">
-                    {filteredETFs[macroKey].length}
-                  </span>
-                  <span className="ml-3 px-3 py-1 bg-yellow-500 text-black rounded-full text-sm font-bold">
-                    ⭐ {filteredETFs[macroKey].filter(etf => favoriteETFs.has(etf.ISIN)).length}
-                  </span>
-                  {Object.keys(selectedETFs[macroKey]).length > 0 && (
-                    <span className="ml-3 px-3 py-1 bg-green-600 text-white rounded-full text-sm font-bold">
-                      📁 {Object.keys(selectedETFs[macroKey]).length}
-                    </span>
-                  )}
-                </h3>
-                
-                {filteredETFs[macroKey].length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                    {filteredETFs[macroKey].map((etf, index) => {
-                      const isFavorite = favoriteETFs.has(etf.ISIN);
-                      const isSelected = selectedETFs[macroKey][etf.ISIN];
-                      return (
-                        <div 
-                          key={index}
-                          className={`bg-gray-700/50 rounded-lg p-4 border transition-all duration-300 hover:shadow-xl group relative ${
-                            isSelected ? 'border-green-400 bg-green-900/20' :
-                            isFavorite ? 'border-yellow-400 bg-yellow-900/20' : 
-                            'border-gray-600 hover:border-blue-500'
-                          }`}
-                        >
-                          <div className="absolute top-2 right-2 flex space-x-1">
-                            <div className="bg-gray-800/90 rounded-full">
-                              <StarIcon 
-                                isFavorite={isFavorite}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleFavoriteETF(etf.ISIN);
-                                }}
-                              />
+            {/* ETF Selection */}
+            {totalAllocation === 0 ? (
+              <div className="bg-gradient-to-r from-orange-900/20 to-amber-900/20 rounded-xl p-12 mb-10 border border-orange-700/50 text-center">
+                <AlertCircle className="w-16 h-16 text-orange-400 mx-auto mb-4" />
+                <h3 className="text-2xl font-semibold mb-2">Inizia impostando le allocazioni</h3>
+                <p className="text-gray-400 max-w-2xl mx-auto">
+                  Per selezionare gli ETF, imposta prima le percentuali di allocazione per le categorie desiderate sopra. 
+                  Ogni categoria richiede almeno 1% di allocazione per essere attivata.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-8 mb-10">
+                {Object.entries(macroCategories).map(([categoryKey, category]) => {
+                  const allCategoryETFs = uploadedData?.filter(etf => etf.macroCategory === categoryKey) || [];
+                  const categoryETFs = groupedData[categoryKey] || [];
+                  const categoryWeight = getCategoryWeight(categoryKey);
+                  const isComplete = categoryWeight === 100;
+                  const isActive = allocations[categoryKey] >= 1;
+                  
+                  if (!isActive) {
+                    return (
+                      <div 
+                        key={categoryKey} 
+                        className="bg-gradient-to-br from-gray-800/30 to-gray-900/30 rounded-xl p-8 border border-gray-700/50 relative overflow-hidden"
+                      >
+                        <div className="absolute inset-0 bg-gray-900/20 backdrop-blur-sm" />
+                        <div className="relative">
+                          <div className="flex items-center gap-3 mb-4">
+                            <span className="text-3xl opacity-30">{category.icon}</span>
+                            <h3 className="text-2xl font-semibold text-gray-600">{category.name}</h3>
+                          </div>
+                          <div className="text-center py-16">
+                            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gray-800/50 mb-4">
+                              <AlertCircle className="w-10 h-10 text-gray-600" />
                             </div>
+                            <p className="text-lg text-gray-500 font-medium">Categoria non attiva</p>
+                            <p className="text-sm text-gray-600 mt-2">Imposta almeno 1% di allocazione</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  
+                  return (
+                    <div 
+                      key={categoryKey} 
+                      className={`bg-gradient-to-br ${category.bgGradient} rounded-xl p-8 border ${category.borderColor}`}
+                    >
+                      <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-2xl font-semibold flex items-center gap-3">
+                          <span className="text-3xl">{category.icon}</span>
+                          <span style={{ color: category.colorLight }}>{category.name}</span>
+                          <span className="text-gray-400">
+                            ({categoryETFs.length}{
+                              (filters[categoryKey].distribution !== 'all' || 
+                               filters[categoryKey].replication !== 'all' || 
+                               filters[categoryKey].currency !== 'all') && 
+                               categoryETFs.length !== allCategoryETFs.length &&
+                               ` di ${allCategoryETFs.length}`
+                            } ETF)
+                            {allocations[categoryKey] > 0 && (
+                              <span 
+                                className="ml-2 text-xs px-2 py-1 rounded-full"
+                                style={{ 
+                                  backgroundColor: `${category.color}20`,
+                                  color: category.colorLight
+                                }}
+                              >
+                                {allocations[categoryKey]}% allocato
+                              </span>
+                            )}
+                            {categoryETFs.length > 4 && (
+                              <span className="ml-2 text-xs bg-gray-700 px-2 py-1 rounded-full">
+                                Scorri per tutti
+                              </span>
+                            )}
+                          </span>
+                        </h3>
+                        <div className="flex items-center gap-3">
+                          <span className={`font-bold text-xl ${isComplete ? 'text-green-400' : 'text-orange-400'}`}>
+                            {categoryWeight}% / 100%
+                          </span>
+                          {isComplete && <Check className="w-6 h-6 text-green-400" />}
+                        </div>
+                      </div>
+                      
+                      {/* Filtri per categoria */}
+                      <div className="mb-4 p-4 bg-gray-900/30 rounded-lg">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <Filter className="w-4 h-4" style={{ color: category.colorLight }} />
+                            <span className="text-sm font-medium">Filtri e Ordinamento</span>
+                          </div>
+                          {(filters[categoryKey].distribution !== 'all' || 
+                            filters[categoryKey].replication !== 'all' || 
+                            filters[categoryKey].currency !== 'all') && (
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleETFInPortfolio(macroKey, etf);
-                              }}
-                              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 font-bold ${
-                                isSelected 
-                                  ? 'bg-green-600 text-white hover:bg-green-700' 
-                                  : 'bg-gray-600 text-gray-300 hover:bg-green-600 hover:text-white'
-                              }`}
-                              title={isSelected ? "Rimuovi dal portafoglio" : "Aggiungi al portafoglio"}
+                              onClick={() => setFilters(prev => ({
+                                ...prev,
+                                [categoryKey]: {
+                                  distribution: 'all',
+                                  replication: 'all',
+                                  currency: 'all',
+                                  sortBy: prev[categoryKey].sortBy
+                                }
+                              }))}
+                              className="text-xs text-gray-400 hover:text-white transition-colors"
                             >
-                              {isSelected ? '✓' : '+'}
+                              Resetta filtri
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <select
+                            value={filters[categoryKey].distribution}
+                            onChange={(e) => setFilters(prev => ({
+                              ...prev,
+                              [categoryKey]: { ...prev[categoryKey], distribution: e.target.value }
+                            }))}
+                            className="bg-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                            style={{ ':focus': { borderColor: category.color } }}
+                          >
+                            <option value="all">Tutti - Distribuzione</option>
+                            <option value="Acc">Accumulazione</option>
+                            <option value="Dist">Distribuzione</option>
+                          </select>
+                          
+                          <select
+                            value={filters[categoryKey].replication}
+                            onChange={(e) => setFilters(prev => ({
+                              ...prev,
+                              [categoryKey]: { ...prev[categoryKey], replication: e.target.value }
+                            }))}
+                            className="bg-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                            style={{ ':focus': { borderColor: category.color } }}
+                          >
+                            <option value="all">Tutti - Replica</option>
+                            <option value="Fisica">Fisica</option>
+                            <option value="Sintetica">Sintetica</option>
+                          </select>
+                          
+                          <select
+                            value={filters[categoryKey].currency}
+                            onChange={(e) => setFilters(prev => ({
+                              ...prev,
+                              [categoryKey]: { ...prev[categoryKey], currency: e.target.value }
+                            }))}
+                            className="bg-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                            style={{ ':focus': { borderColor: category.color } }}
+                          >
+                            <option value="all">Tutte - Valute</option>
+                            <option value="EUR">EUR</option>
+                            <option value="USD">USD</option>
+                            <option value="GBP">GBP</option>
+                          </select>
+                          
+                          <select
+                            value={filters[categoryKey].sortBy}
+                            onChange={(e) => setFilters(prev => ({
+                              ...prev,
+                              [categoryKey]: { ...prev[categoryKey], sortBy: e.target.value }
+                            }))}
+                            className="bg-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                            style={{ ':focus': { borderColor: category.color } }}
+                          >
+                            <option value="aum">Ordina per AuM</option>
+                            <option value="ter">Ordina per TER</option>
+                            <option value="name">Ordina per Nome</option>
+                          </select>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-4 overflow-y-auto pr-2 pb-2" style={{ maxHeight: '520px' }}>
+                        {categoryETFs.length === 0 ? (
+                          <div className="text-center py-8 text-gray-400">
+                            <AlertCircle className="w-8 h-8 mx-auto mb-3 opacity-50" />
+                            <p>Nessun ETF trovato con i filtri selezionati</p>
+                            <button
+                              onClick={() => setFilters(prev => ({
+                                ...prev,
+                                [categoryKey]: {
+                                  distribution: 'all',
+                                  replication: 'all',
+                                  currency: 'all',
+                                  sortBy: prev[categoryKey].sortBy
+                                }
+                              }))}
+                              className="mt-3 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                            >
+                              Resetta filtri
                             </button>
                           </div>
-
-                          <h4 className="font-medium text-sm mb-2 pr-20 text-blue-300">
-                            {isFavorite && <span className="text-yellow-400 mr-1">⭐</span>}
-                            {isSelected && <span className="text-green-400 mr-1">✓</span>}
-                            {etf.Nome.length > 32 ? etf.Nome.substring(0, 32) + '...' : etf.Nome}
-                          </h4>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div><span className="text-gray-400">TER:</span> <span className="font-bold text-red-400">{etf.TER}%</span></div>
-                            <div><span className="text-gray-400">Valuta:</span> <span className="font-bold text-yellow-400">{etf.Valuta}</span></div>
-                            <div><span className="text-gray-400">AuM:</span> <span className="font-bold text-green-400">{etf.AuM?.toLocaleString()}M€</span></div>
-                            <div><span className="text-gray-400">Tipo:</span> <span className="font-medium text-blue-300">{etf.Distribuzione === 'Accumulazione' ? 'ACC' : etf.Distribuzione === 'Distribuzione' ? 'DIST' : 'N/D'}</span></div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 text-gray-400 h-64 flex flex-col items-center justify-center">
-                    <div className="text-4xl mb-4">🔍</div>
-                    Nessun ETF corrisponde ai criteri selezionati
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {Object.values(selectedETFs).some(category => Object.keys(category).length > 0) && (
-          <div className="bg-gradient-to-br from-green-900/20 to-blue-900/20 backdrop-blur-sm rounded-2xl p-6 border border-green-500/30 mb-12">
-            <div className="text-center mb-6">
-              <h2 className="text-3xl font-bold bg-gradient-to-r from-green-400 to-blue-400 bg-clip-text text-transparent mb-1">
-                🎯 Il Tuo Portafoglio
-              </h2>
-              <p className="text-gray-300 text-sm">ETF selezionati e pesi nel portafoglio</p>
-            </div>
-
-            {Object.entries(macroCategories).map(([macroKey, category]) => {
-              const categoryETFs = Object.values(selectedETFs[macroKey]);
-              if (categoryETFs.length === 0) return null;
-
-              return (
-                <div key={macroKey} className="mb-6 bg-gray-800/30 rounded-xl p-4 border border-gray-600">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-bold flex items-center">
-                      <div 
-                        className="w-5 h-5 rounded-full mr-2" 
-                        style={{backgroundColor: COLORS[macroKey]}}
-                      ></div>
-                      {category.icon} {category.name}
-                      <span className="ml-2 text-lg" style={{color: COLORS[macroKey]}}>
-                        {allocations[macroKey]}% del portafoglio
-                      </span>
-                      <div className={`ml-3 px-2 py-1 rounded-full text-xs font-bold ${
-                        getTotalWeightForCategory(macroKey) === 100 ? 'bg-green-600 text-white' : 
-                        getTotalWeightForCategory(macroKey) > 100 ? 'bg-red-600 text-white animate-pulse' : 
-                        'bg-yellow-600 text-black'
-                      }`}>
-                        {getTotalWeightForCategory(macroKey)}%
-                        {getTotalWeightForCategory(macroKey) === 100 && (
-                          <span className="ml-1">✓</span>
+                        ) : (
+                          categoryETFs.map(etf => {
+                            const isSelected = selectedETFs[categoryKey][etf.id];
+                            const weight = selectedETFs[categoryKey][etf.id]?.weight || 0;
+                            
+                            return (
+                              <div
+                                key={etf.id}
+                                className={`p-4 rounded-lg border-2 transition-all bg-gray-800/80 ${
+                                  isSelected 
+                                    ? `${category.borderColor} bg-opacity-90` 
+                                    : 'border-gray-600 hover:border-gray-500'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex gap-3 flex-1 min-w-0">
+                                    <button
+                                      onClick={() => toggleStar(etf.id)}
+                                      className="transition-colors flex-shrink-0 mt-1"
+                                    >
+                                      <Star
+                                        className={`w-5 h-5 ${
+                                          starredETFs.has(etf.id) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-500'
+                                        }`}
+                                      />
+                                    </button>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-semibold text-base truncate" title={etf.Nome}>
+                                        {etf.Nome}
+                                      </div>
+                                      <div className="text-gray-400 text-sm">{etf.ISIN}</div>
+                                      
+                                      <div className="grid grid-cols-4 gap-3 text-sm mt-3">
+                                        <div className="flex items-center gap-1">
+                                          <TrendingUp className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                          <span className="truncate">TER: {(() => {
+                                            const terValue = getTERValue(etf);
+                                            if (terValue !== null) {
+                                              // Il valore è già in percentuale (es. 0.07 = 0.07%)
+                                              return `${terValue.toFixed(2)}%`;
+                                            }
+                                            return 'N/D';
+                                          })()}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <DollarSign className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                          <span title="Clicca per info debug" 
+                                                onClick={() => console.log('ETF data:', etf)}
+                                                className="cursor-help truncate">
+                                            AuM: {(() => {
+                                              // Approccio super flessibile per trovare AuM
+                                              let aumValue = null;
+                                              let foundKey = null;
+                                              
+                                              // Prova prima i nomi esatti più comuni
+                                              const exactKeys = [
+                                                'AuM (Mln EUR)',
+                                                'AuM (Mln EUR)', // Con spazi diversi
+                                                'AuM(Mln EUR)',  // Senza spazio
+                                                'AUM (MLN EUR)',
+                                                'AuM',
+                                                'AUM'
+                                              ];
+                                              
+                                              for (const key of exactKeys) {
+                                                if (etf[key] !== undefined && etf[key] !== null && etf[key] !== '') {
+                                                  aumValue = etf[key];
+                                                  foundKey = key;
+                                                  break;
+                                                }
+                                              }
+                                              
+                                              // Se non trova, cerca in tutti i campi
+                                              if (!aumValue) {
+                                                for (const [key, value] of Object.entries(etf)) {
+                                                  const keyLower = key.toLowerCase();
+                                                  if ((keyLower.includes('aum') || 
+                                                       keyLower.includes('assets') || 
+                                                       (keyLower.includes('mln') && keyLower.includes('eur'))) &&
+                                                      value !== undefined && 
+                                                      value !== null && 
+                                                      value !== '') {
+                                                    aumValue = value;
+                                                    foundKey = key;
+                                                    break;
+                                                  }
+                                                }
+                                              }
+                                              
+                                              if (aumValue) {
+                                                // Converti in numero
+                                                const numStr = String(aumValue)
+                                                  .replace(/[^\d.,\-]/g, '') // Rimuovi tutto tranne numeri, punti, virgole e segno meno
+                                                  .replace(',', '.');        // Converti virgola in punto
+                                                
+                                                const num = parseFloat(numStr);
+                                                
+                                                if (!isNaN(num)) {
+                                                  return `${num.toLocaleString('it-IT', { 
+                                                    minimumFractionDigits: 0,
+                                                    maximumFractionDigits: 0 
+                                                  })}M€`;
+                                                }
+                                                // Se non è un numero valido, mostra il valore originale
+                                                return `${aumValue}`;
+                                              }
+                                              
+                                              return 'N/D';
+                                            })()}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <Package className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                          <span className="truncate">{etf.Distribuzione || 'N/D'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          <Building className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                          <span className="truncate">{etf.Valuta || 'N/D'}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => toggleETFSelection(categoryKey, etf.id)}
+                                    className={`px-4 py-2 rounded-lg transition-colors font-medium text-sm flex-shrink-0 ${
+                                      isSelected 
+                                        ? `bg-${category.colorDark} hover:bg-${category.color}` 
+                                        : 'bg-gray-700 hover:bg-gray-600'
+                                    }`}
+                                    style={{
+                                      backgroundColor: isSelected ? category.colorDark : undefined,
+                                      ':hover': { backgroundColor: isSelected ? category.color : undefined }
+                                    }}
+                                  >
+                                    {isSelected ? 'Rimuovi' : 'Aggiungi'}
+                                  </button>
+                                </div>
+                                
+                                {isSelected && (
+                                  <div className="mt-4 p-4 bg-gray-900/50 rounded-lg">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <span className="text-sm">Peso nel portafoglio:</span>
+                                      <span className="font-bold text-xl" style={{ color: category.colorLight }}>
+                                        {weight}%
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => updateETFWeight(categoryKey, etf.id, weight - 1)}
+                                        className="w-8 h-8 flex-shrink-0 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center transition-colors"
+                                      >
+                                        <Minus className="w-4 h-4" />
+                                      </button>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="100"
+                                        value={weight}
+                                        onChange={(e) => updateETFWeight(categoryKey, etf.id, parseInt(e.target.value))}
+                                        className="flex-1 h-2 cursor-pointer"
+                                        style={{
+                                          background: `linear-gradient(to right, ${category.color} 0%, ${category.color} ${weight}%, #374151 ${weight}%, #374151 100%)`
+                                        }}
+                                      />
+                                      <button
+                                        onClick={() => updateETFWeight(categoryKey, etf.id, weight + 1)}
+                                        className="w-8 h-8 flex-shrink-0 bg-gray-700 hover:bg-gray-600 rounded flex items-center justify-center transition-colors"
+                                      >
+                                        <Plus className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                    <div className="text-sm text-gray-400 mt-2">
+                                      Peso effettivo nel portafoglio totale: 
+                                      <span className="font-semibold" style={{ color: category.colorLight }}>
+                                        {' '}{((weight / 100) * allocations[categoryKey]).toFixed(2)}%
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
                         )}
                       </div>
-                    </h3>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Summary */}
+            <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 rounded-xl p-10 border border-blue-700">
+              <h2 className="text-3xl font-semibold mb-8">Riepilogo Portafoglio</h2>
+              <div className="grid grid-cols-3 gap-8">
+                <div className="bg-gray-800/50 rounded-xl p-8">
+                  <div className="flex items-center gap-3 mb-4">
+                    <BarChart3 className="w-8 h-8 text-blue-400" />
+                    <span className="text-gray-400 text-lg">ETF Totali</span>
                   </div>
-
-                  <div className="space-y-3">
-                    {categoryETFs.map((etf) => {
-                      const effectiveWeight = getEffectiveWeight(macroKey, etf.weight);
-                      const isFavorite = favoriteETFs.has(etf.ISIN);
-                      
-                      return (
-                        <div key={etf.ISIN} className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
-                          <div className="grid grid-cols-12 gap-4 items-center">
-                            
-                            <div className="col-span-5">
-                              <div className="flex items-start justify-between">
-                                <div className="flex-1">
-                                  <h4 className="font-medium text-blue-300 text-sm mb-1">
-                                    {isFavorite && <span className="text-yellow-400 mr-1">⭐</span>}
-                                    {etf.Nome}
-                                  </h4>
-                                  <div className="grid grid-cols-2 gap-x-4 text-xs text-gray-400">
-                                    <div>ISIN: <span className="text-gray-300 font-mono">{etf.ISIN}</span></div>
-                                    <div>Ticker: <span className="text-gray-300 font-mono">{etf.Ticker || 'N/A'}</span></div>
-                                    <div>AuM: <span className="text-green-400 font-bold">{etf.AuM?.toLocaleString()}M€</span></div>
-                                    <div>Valuta: <span className="text-yellow-400 font-bold">{etf.Valuta}</span></div>
-                                    <div>TER: <span className="text-red-400 font-bold">{etf.TER}%</span></div>
-                                    <div>Tipo: <span className="text-blue-300 font-bold">{etf.Distribuzione === 'Accumulazione' ? 'ACC' : etf.Distribuzione === 'Distribuzione' ? 'DIST' : 'N/D'}</span></div>
-                                  </div>
-                                </div>
-                                <button
-                                  onClick={() => toggleETFInPortfolio(macroKey, etf)}
-                                  className="ml-2 text-red-400 hover:text-red-300 text-lg"
-                                  title="Rimuovi"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="col-span-4">
-                              <div className="text-center mb-2">
-                                <div className="text-xs text-gray-400 mb-1">Peso in {category.name}</div>
-                                <div className="text-2xl font-bold text-blue-400">{etf.weight}%</div>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <button
-                                  onClick={() => updateETFWeight(macroKey, etf.ISIN, Math.max(1, etf.weight - 1))}
-                                  className="w-8 h-8 bg-gray-600 hover:bg-gray-500 rounded-full text-white font-bold text-sm"
-                                >
-                                  −
-                                </button>
-                                <input
-                                  type="range"
-                                  min="1"
-                                  max="100"
-                                  value={etf.weight}
-                                  onChange={(e) => updateETFWeight(macroKey, etf.ISIN, e.target.value)}
-                                  className="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-                                />
-                                <button
-                                  onClick={() => updateETFWeight(macroKey, etf.ISIN, Math.min(100, etf.weight + 1))}
-                                  className="w-8 h-8 bg-gray-600 hover:bg-gray-500 rounded-full text-white font-bold text-sm"
-                                >
-                                  +
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="col-span-3">
-                              <div className="text-center bg-green-900/30 rounded-lg p-3 border border-green-500/30">
-                                <div className="text-xs text-green-300">Peso Totale</div>
-                                <div className="text-2xl font-bold text-green-400">
-                                  {effectiveWeight.toFixed(2)}%
-                                </div>
-                                <div className="text-xs text-green-200">
-                                  ({etf.weight}% di {allocations[macroKey]}%)
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <div className="text-5xl font-bold">{getSelectedETFsCount()}</div>
                 </div>
-              );
-            })}
-
-            <div className="bg-blue-900/20 rounded-xl p-4 border border-blue-500/30 text-center">
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <div className="text-2xl font-bold text-blue-400">
-                    {Object.values(selectedETFs).reduce((total, category) => total + Object.keys(category).length, 0)}
+                <div className="bg-gray-800/50 rounded-xl p-8">
+                  <div className="flex items-center gap-3 mb-4">
+                    <TrendingUp className="w-8 h-8 text-green-400" />
+                    <span className="text-gray-400 text-lg">Copertura</span>
                   </div>
-                  <div className="text-sm text-gray-400">ETF Selezionati</div>
+                  <div className="text-5xl font-bold">{getPortfolioCoverage()}%</div>
                 </div>
-                <div>
-                  <div className="text-2xl font-bold text-green-400">
-                    {Object.values(selectedETFs).reduce((total, category) => {
-                      return total + Object.values(category).reduce((catTotal, etf) => 
-                        catTotal + getEffectiveWeight(
-                          Object.keys(selectedETFs).find(key => selectedETFs[key][etf.ISIN]), 
-                          etf.weight
-                        ), 0
-                      );
-                    }, 0).toFixed(0)}%
+                <div className="bg-gray-800/50 rounded-xl p-8">
+                  <div className="flex items-center gap-3 mb-4">
+                    <DollarSign className="w-8 h-8 text-yellow-400" />
+                    <span className="text-gray-400 text-lg">TER Medio</span>
                   </div>
-                  <div className="text-sm text-gray-400">Copertura Totale</div>
-                </div>
-                <div>
-                  <div className="text-2xl font-bold text-yellow-400">
-                    {Object.values(selectedETFs).reduce((total, category) => {
-                      return total + Object.values(category).reduce((catTotal, etf) => 
-                        catTotal + (etf.TER * getEffectiveWeight(
-                          Object.keys(selectedETFs).find(key => selectedETFs[key][etf.ISIN]), 
-                          etf.weight
-                        ) / 100), 0
-                      );
-                    }, 0).toFixed(2)}%
-                  </div>
-                  <div className="text-sm text-gray-400">TER Medio</div>
+                  <div className="text-5xl font-bold">{calculateWeightedTER()}%</div>
                 </div>
               </div>
-            </div>
-
-            {Object.values(selectedETFs).some(category => Object.keys(category).length > 0) && (
-              <div className="text-center mt-8">
+              
+              {/* Export Button */}
+              <div className="mt-8 text-center">
                 <button
-                  disabled
-                  className="px-12 py-4 text-xl font-bold rounded-2xl bg-gray-600 text-gray-400 cursor-not-allowed opacity-50"
+                  onClick={() => setShowExportView(true)}
+                  disabled={!isPortfolioComplete()}
+                  className={`inline-flex items-center gap-3 px-8 py-4 rounded-lg font-semibold text-lg transition-all transform ${
+                    isPortfolioComplete()
+                      ? 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 hover:scale-105 shadow-lg'
+                      : 'bg-gray-700 cursor-not-allowed opacity-50'
+                  }`}
                 >
-                  {isPortfolioComplete() ? '🎯 PORTAFOGLIO CREATO' : '⚠️ Bilancia tutte le categorie al 100%'}
+                  <Download className="w-6 h-6" />
+                  ESPORTA PORTAFOGLIO
                 </button>
                 {!isPortfolioComplete() && (
-                  <p className="text-sm text-yellow-400 mt-2">
-                    Assicurati che ogni categoria abbia ETF con pesi che sommano al 100%
+                  <p className="mt-3 text-sm text-gray-400 flex items-center justify-center">
+                    <AlertCircle className="w-4 h-4 mr-2" />
+                    Completa l'allocazione al 100% per esportare
                   </p>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          </>
         )}
       </div>
+      )}
     </div>
   );
 };
